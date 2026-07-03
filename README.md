@@ -1,0 +1,153 @@
+# FINANCEIRO SALLES
+
+Sistema financeiro e operacional para controle de pacotes de subbase/transportadora.
+
+## O que vem neste projeto
+
+- Aplicacao React com TypeScript
+- Estilo com Tailwind
+- Build com Vite
+- Persistencia em LocalStorage
+- Exportacao PDF com jsPDF
+- Exportacao Excel em XLSX
+- Cadastro e edicao de transportadoras
+- PWA instalavel com manifest e service worker
+- Pasta dist pronta para publicar
+
+## Como rodar no computador
+
+1. Instale o Node.js LTS.
+2. Abra o terminal dentro da pasta do projeto.
+3. Rode:
+
+```bash
+npm install
+npm run dev
+```
+
+4. Abra o endereco mostrado no terminal.
+
+Normalmente sera:
+
+```text
+http://localhost:5173
+```
+
+## Como gerar uma versao de producao
+
+Rode:
+
+```bash
+npm run build
+```
+
+Os arquivos prontos ficam na pasta:
+
+```text
+dist
+```
+
+## Como testar a versao de producao
+
+Depois do build, rode:
+
+```bash
+npm run preview
+```
+
+## Como publicar
+
+Use a pasta `dist`.
+
+Opcoes comuns:
+
+1. Vercel
+   - Build command: npm run build
+   - Output directory: dist
+
+2. Netlify
+   - Build command: npm run build
+   - Publish directory: dist
+
+3. Hospedagem propria
+   - Envie todo o conteudo da pasta dist para o servidor.
+
+Importante: para funcionar como PWA instalavel, publique em HTTPS.
+
+## Como transformar em APK Android
+
+Caminho recomendado com Capacitor:
+
+```bash
+npm install @capacitor/core @capacitor/cli @capacitor/android
+npm run build
+npx cap init "FINANCEIRO SALLES" "com.salles.financeiro" --web-dir=dist
+npx cap add android
+npx cap sync android
+npx cap open android
+```
+
+No Android Studio:
+
+1. Confira nome e icone.
+2. Use Build > Generate Signed Bundle / APK.
+3. Gere APK assinado ou AAB para Play Store.
+
+## Regras financeiras principais
+
+Receita Total:
+
+- Usa os valores individuais de cada transportadora.
+
+Receita Parceria:
+
+- ML: R$ 8,00 por pacote
+- Shopee: R$ 5,00 por pacote
+- Avulso: R$ 8,00 por pacote
+
+Diferenca:
+
+```text
+Receita Total - Receita Parceria
+```
+
+Lucro Real:
+
+```text
+Diferenca - Custos Fixos - Custo LogManager
+```
+
+Custo LogManager:
+
+```text
+Total de Pacotes x R$ 0,25
+```
+
+## Transportadoras
+
+Use a aba Transportadoras para:
+
+- Cadastrar nova transportadora
+- Editar nome e valores
+- Ativar ou inativar transportadora
+
+Transportadoras ativas aparecem no Lancamento Diario.
+Transportadoras inativas continuam preservadas nos dados antigos.
+
+## Exportacoes
+
+Nas abas Semanal, Quinzenal e Mensal:
+
+- Exportar PDF Geral
+- Exportar PDF por Transportadora
+- Exportar Excel
+
+O Excel gera um arquivo .xlsx com:
+
+- Aba Geral
+- Aba separada por transportadora
+- Periodo do fechamento
+- Quantidade por plataforma
+- Valores unitarios
+- Total por transportadora
+- Total geral

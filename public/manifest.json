@@ -1,0 +1,19 @@
+{
+  "name": "FINANCEIRO SALLES",
+  "short_name": "Salles",
+  "description": "Sistema financeiro e operacional para controle de pacotes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050505",
+  "theme_color": "#b70f17",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
