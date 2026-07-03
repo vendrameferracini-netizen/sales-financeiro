@@ -1,5 +1,6 @@
 import { ReactNode, useState } from "react";
 import { Layout, PageKey } from "./components/Layout";
+import { FinanceProvider } from "./contexts/FinanceContext";
 import { DailyEntryPage } from "./pages/DailyEntryPage";
 import { CarriersPage } from "./pages/CarriersPage";
 import { CostsPage } from "./pages/CostsPage";
@@ -27,16 +28,18 @@ export const App = () => {
   }
 
   return (
-    <Layout
-      activePage={activePage}
-      setActivePage={setActivePage}
-      onLogout={() => {
-        logout();
-        setActivePage("daily");
-        setAuthenticated(false);
-      }}
-    >
-      {pages[activePage]}
-    </Layout>
+    <FinanceProvider>
+      <Layout
+        activePage={activePage}
+        setActivePage={setActivePage}
+        onLogout={() => {
+          logout();
+          setActivePage("daily");
+          setAuthenticated(false);
+        }}
+      >
+        {pages[activePage]}
+      </Layout>
+    </FinanceProvider>
   );
 };

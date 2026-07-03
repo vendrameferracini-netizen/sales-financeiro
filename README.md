@@ -7,7 +7,8 @@ Sistema financeiro e operacional para controle de pacotes de subbase/transportad
 - Aplicacao React com TypeScript
 - Estilo com Tailwind
 - Build com Vite
-- Persistencia em LocalStorage
+- Persistencia online em Supabase
+- Cache temporario offline com sincronizacao ao reconectar
 - Exportacao PDF com jsPDF
 - Exportacao Excel em XLSX
 - Cadastro e edicao de transportadoras
@@ -17,8 +18,17 @@ Sistema financeiro e operacional para controle de pacotes de subbase/transportad
 ## Como rodar no computador
 
 1. Instale o Node.js LTS.
-2. Abra o terminal dentro da pasta do projeto.
-3. Rode:
+2. Crie um projeto no Supabase.
+3. No SQL Editor do Supabase, execute o arquivo `supabase-schema.sql`.
+4. Crie um arquivo `.env` baseado em `.env.example`:
+
+```text
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-chave-anon-public
+```
+
+5. Abra o terminal dentro da pasta do projeto.
+6. Rode:
 
 ```bash
 npm install
@@ -57,13 +67,16 @@ npm run preview
 
 ## Como publicar
 
-Use a pasta `dist`.
+Use GitHub + Vercel ou a pasta `dist`.
 
 Opcoes comuns:
 
 1. Vercel
    - Build command: npm run build
    - Output directory: dist
+   - Environment Variables:
+     - VITE_SUPABASE_URL
+     - VITE_SUPABASE_ANON_KEY
 
 2. Netlify
    - Build command: npm run build
@@ -73,6 +86,27 @@ Opcoes comuns:
    - Envie todo o conteudo da pasta dist para o servidor.
 
 Importante: para funcionar como PWA instalavel, publique em HTTPS.
+
+## Supabase
+
+O app usa Supabase para:
+
+- Transportadoras
+- Lancamentos diarios
+- Custos fixos
+- Configuracoes
+- Login e senha
+
+As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
+
+Na primeira execucao, se existirem dados antigos no LocalStorage, o app tenta migrar automaticamente para o Supabase. Depois disso, o LocalStorage fica apenas como cache temporario offline e fila de sincronizacao.
+
+Credenciais iniciais:
+
+```text
+Login: salesfinanceiro
+Senha: Sales123
+```
 
 ## Como transformar em APK Android
 

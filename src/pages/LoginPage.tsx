@@ -11,39 +11,50 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const clearMessages = () => {
     setMessage("");
     setError("");
   };
 
-  const submitLogin = (event: FormEvent) => {
+  const submitLogin = async (event: FormEvent) => {
     event.preventDefault();
     clearMessages();
+    setSubmitting(true);
 
-    if (!login(username, password)) {
-      setError("Login ou senha incorretos.");
-      return;
+    try {
+      if (!(await login(username, password))) {
+        setError("Login ou senha incorretos.");
+        return;
+      }
+
+      onLogin();
+    } finally {
+      setSubmitting(false);
     }
-
-    onLogin();
   };
 
-  const submitPasswordChange = (event: FormEvent) => {
+  const submitPasswordChange = async (event: FormEvent) => {
     event.preventDefault();
     clearMessages();
+    setSubmitting(true);
 
-    const result = changePassword(currentPassword, newPassword, confirmPassword);
-    if (!result.success) {
-      setError(result.message);
-      return;
+    try {
+      const result = await changePassword(currentPassword, newPassword, confirmPassword);
+      if (!result.success) {
+        setError(result.message);
+        return;
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowPasswordForm(false);
+      setMessage(result.message);
+    } finally {
+      setSubmitting(false);
     }
-
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setShowPasswordForm(false);
-    setMessage(result.message);
   };
 
   return (
@@ -62,7 +73,7 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
         <div className="login-copy">
           <p className="eyebrow">ACESSO RESTRITO</p>
           <h1>Entrar no sistema</h1>
-          <span>Controle financeiro operacional protegido por login local.</span>
+          <span>Controle financeiro operacional protegido por login sincronizado.</span>
         </div>
 
         {!showPasswordForm ? (
@@ -82,9 +93,9 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
             </label>
             {error && <p className="auth-message error">{error}</p>}
             {message && <p className="auth-message success">{message}</p>}
-            <button className="primary-button" type="submit">
+            <button className="primary-button" type="submit" disabled={submitting}>
               <LogIn size={20} />
-              Entrar
+              {submitting ? "Entrando..." : "Entrar"}
             </button>
             <button
               className="secondary-button"
@@ -128,9 +139,9 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
               />
             </label>
             {error && <p className="auth-message error">{error}</p>}
-            <button className="primary-button" type="submit">
+            <button className="primary-button" type="submit" disabled={submitting}>
               <KeyRound size={20} />
-              Salvar senha
+              {submitting ? "Salvando..." : "Salvar senha"}
             </button>
             <button
               className="secondary-button"
