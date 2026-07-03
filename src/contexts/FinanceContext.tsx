@@ -1,12 +1,13 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
-import { cacheFinanceData, deleteFixedCost, loadFinanceData, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName, syncPendingOperations } from "../utils/storage";
+import { deleteFixedCost, loadFinanceData, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
   carriers: Carrier[];
   entries: Record<string, DailyEntry>;
   fixedCosts: FixedCost[];
   loading: boolean;
+  error: string;
   getEntry: (date: string) => DailyEntry | undefined;
   saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => void;
   addCarrier: (carrier: Omit<Carrier, "id">) => void;
@@ -17,19 +18,14 @@ type FinanceContextValue = {
 
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
+const errorText = (error: unknown) => (error instanceof Error ? error.message : "Erro ao comunicar com o Supabase.");
+
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
   const [carriers, setCarriers] = useState<Carrier[]>([]);
   const [entries, setEntries] = useState<Record<string, DailyEntry>>({});
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const persistCache = useCallback((nextCarriers: Carrier[], nextEntries: Record<string, DailyEntry>, nextFixedCosts: FixedCost[]) => {
-    cacheFinanceData({
-      carriers: nextCarriers,
-      entries: nextEntries,
-      fixedCosts: nextFixedCosts
-    });
-  }, []);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -39,6 +35,12 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         setCarriers(sortCarriersByName(snapshot.carriers));
         setEntries(snapshot.entries);
         setFixedCosts(snapshot.fixedCosts);
+        setError("");
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        console.error("Erro completo ao carregar dados do Supabase", loadError);
+        setError(errorText(loadError));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -49,80 +51,81 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  useEffect(() => {
-    const sync = () => {
-      syncPendingOperations().catch(() => undefined);
-    };
-    window.addEventListener("online", sync);
-    sync();
-    return () => window.removeEventListener("online", sync);
-  }, []);
-
   const value = useMemo<FinanceContextValue>(
     () => ({
       carriers,
       entries,
       fixedCosts,
       loading,
+      error,
       getEntry: (date) => entries[date],
       saveEntry: (date, carrierInputs) => {
-        setEntries((current) => {
-          const nextEntry = {
-            date,
-            carriers: {
-              ...(current[date]?.carriers || {}),
-              ...carrierInputs
-            }
-          };
-          const nextEntries = {
-            ...current,
-            [date]: nextEntry
-          };
-          persistCache(carriers, nextEntries, fixedCosts);
-          saveDailyEntry(nextEntry).catch(() => undefined);
-          return nextEntries;
-        });
+        const nextEntry = {
+          date,
+          carriers: {
+            ...(entries[date]?.carriers || {}),
+            ...carrierInputs
+          }
+        };
+        saveDailyEntry(nextEntry)
+          .then(() => {
+            setEntries((current) => ({
+              ...current,
+              [date]: nextEntry
+            }));
+            setError("");
+          })
+          .catch((saveError) => {
+            console.error("Erro completo ao salvar lancamento no Supabase", saveError);
+            setError(errorText(saveError));
+          });
       },
       addCarrier: (carrier) => {
         saveCarrier(carrier)
           .then((savedCarrier) => {
-            setCarriers((current) => {
-              const nextCarriers = sortCarriersByName([...current, savedCarrier]);
-              persistCache(nextCarriers, entries, fixedCosts);
-              return nextCarriers;
-            });
+            setCarriers((current) => sortCarriersByName([...current, savedCarrier]));
+            setError("");
           })
-          .catch(() => undefined);
+          .catch((saveError) => {
+            console.error("Erro completo ao salvar transportadora no Supabase", saveError);
+            setError(errorText(saveError));
+          });
       },
       updateCarrier: (carrier) => {
-        setCarriers((current) => {
-          const nextCarriers = sortCarriersByName(current.map((item) => (item.id === carrier.id ? carrier : item)));
-          persistCache(nextCarriers, entries, fixedCosts);
-          return nextCarriers;
-        });
-        saveCarrier(carrier).catch(() => undefined);
+        saveCarrier(carrier)
+          .then((savedCarrier) => {
+            setCarriers((current) => sortCarriersByName(current.map((item) => (item.id === savedCarrier.id ? savedCarrier : item))));
+            setError("");
+          })
+          .catch((saveError) => {
+            console.error("Erro completo ao atualizar transportadora no Supabase", saveError);
+            setError(errorText(saveError));
+          });
       },
       addFixedCost: (cost) => {
         saveFixedCost(cost)
           .then((savedCost) => {
-            setFixedCosts((current) => {
-              const nextFixedCosts = [...current, savedCost];
-              persistCache(carriers, entries, nextFixedCosts);
-              return nextFixedCosts;
-            });
+            setFixedCosts((current) => [...current, savedCost]);
+            setError("");
           })
-          .catch(() => undefined);
+          .catch((saveError) => {
+            console.error("Erro completo ao salvar custo no Supabase", saveError);
+            setError(errorText(saveError));
+          });
       },
       removeFixedCost: (id) => {
-        setFixedCosts((current) => {
-          const nextFixedCosts = current.filter((cost) => cost.id !== id);
-          persistCache(carriers, entries, nextFixedCosts);
-          return nextFixedCosts;
-        });
-        deleteFixedCost(id).catch(() => undefined);
+        deleteFixedCost(id)
+          .then(() => {
+            setFixedCosts((current) => current.filter((cost) => cost.id !== id));
+            setError("");
+          })
+          .catch((saveError) => {
+            console.error("Erro completo ao remover custo no Supabase", saveError);
+            setError(errorText(saveError));
+          });
       }
     }),
-    [carriers, entries, fixedCosts, loading, persistCache]
+    [carriers, entries, fixedCosts, loading, error]
   );
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;

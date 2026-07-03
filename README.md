@@ -8,7 +8,6 @@ Sistema financeiro e operacional para controle de pacotes de subbase/transportad
 - Estilo com Tailwind
 - Build com Vite
 - Persistencia online em Supabase
-- Cache temporario offline com sincronizacao ao reconectar
 - Exportacao PDF com jsPDF
 - Exportacao Excel em XLSX
 - Cadastro e edicao de transportadoras
@@ -99,7 +98,7 @@ O app usa Supabase para:
 
 As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
 
-Na primeira execucao, se existirem dados antigos no LocalStorage, o app tenta migrar automaticamente para o Supabase. Depois disso, o LocalStorage fica apenas como cache temporario offline e fila de sincronizacao.
+O Supabase e obrigatorio. Sem `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`, o app mostra erro visual e nao grava dados localmente.
 
 Credenciais iniciais:
 

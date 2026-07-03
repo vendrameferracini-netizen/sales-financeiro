@@ -2,30 +2,10 @@ import { defaultCarriers } from "../data/carriers";
 import { Carrier, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
 
-const LEGACY_ENTRIES_KEY = "financeiro-salles:entries";
-const LEGACY_COSTS_KEY = "financeiro-salles:fixed-costs";
-const LEGACY_CARRIERS_KEY = "financeiro-salles:carriers";
-
-const CACHE_KEY = "financeiro-salles:supabase-cache";
-const QUEUE_KEY = "financeiro-salles:sync-queue";
-const MIGRATION_KEY = "financeiro-salles:supabase-migrated";
-
 type FinanceSnapshot = {
   carriers: Carrier[];
   entries: Record<string, DailyEntry>;
   fixedCosts: FixedCost[];
-};
-
-type QueueOperation =
-  | { type: "upsert-carrier"; carrier: Carrier }
-  | { type: "upsert-entry"; entry: DailyEntry }
-  | { type: "upsert-cost"; cost: FixedCost }
-  | { type: "delete-cost"; id: string };
-
-const emptySnapshot: FinanceSnapshot = {
-  carriers: [],
-  entries: {},
-  fixedCosts: []
 };
 
 export const sortCarriersByName = (carriers: Carrier[] = []) =>
@@ -33,35 +13,10 @@ export const sortCarriersByName = (carriers: Carrier[] = []) =>
 
 const makeId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
-const readJson = <T,>(key: string, fallback: T): T => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+const logError = (message: string, error: unknown) => {
+  console.error(message, error);
+  throw error;
 };
-
-const writeJson = (key: string, value: unknown) => localStorage.setItem(key, JSON.stringify(value));
-
-const readCache = () => readJson<FinanceSnapshot>(CACHE_KEY, emptySnapshot);
-
-const writeCache = (snapshot: FinanceSnapshot) =>
-  writeJson(CACHE_KEY, {
-    carriers: sortCarriersByName(snapshot.carriers),
-    entries: snapshot.entries || {},
-    fixedCosts: snapshot.fixedCosts || []
-  });
-
-const readQueue = () => readJson<QueueOperation[]>(QUEUE_KEY, []);
-const writeQueue = (operations: QueueOperation[]) => writeJson(QUEUE_KEY, operations);
-const queueOperation = (operation: QueueOperation) => writeQueue([...readQueue(), operation]);
-
-const legacySnapshot = (): FinanceSnapshot => ({
-  carriers: readJson<Carrier[] | null>(LEGACY_CARRIERS_KEY, null) || [],
-  entries: readJson<Record<string, DailyEntry>>(LEGACY_ENTRIES_KEY, {}),
-  fixedCosts: readJson<FixedCost[]>(LEGACY_COSTS_KEY, [])
-});
 
 const carrierRow = (carrier: Carrier) => ({
   id: carrier.id,
@@ -90,72 +45,39 @@ const fixedCostRow = (cost: FixedCost) => ({
 });
 
 const upsertCarrierOnline = async (carrier: Carrier) => {
+  console.log("Salvando no Supabase", { table: "carriers", id: carrier.id });
   const { error } = await requireSupabase().from("carriers").upsert(carrierRow(carrier));
-  if (error) throw error;
+  if (error) logError("Erro ao salvar transportadora no Supabase", error);
 };
 
 const upsertEntryOnline = async (entry: DailyEntry) => {
+  console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date });
   const { error } = await requireSupabase().from("daily_entries").upsert(entryRow(entry));
-  if (error) throw error;
+  if (error) logError("Erro ao salvar lancamento diario no Supabase", error);
 };
 
 const upsertFixedCostOnline = async (cost: FixedCost) => {
+  console.log("Salvando no Supabase", { table: "fixed_costs", id: cost.id });
   const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostRow(cost));
-  if (error) throw error;
+  if (error) logError("Erro ao salvar custo fixo no Supabase", error);
 };
 
-const deleteFixedCostOnline = async (id: string) => {
+export const deleteFixedCost = async (id: string) => {
+  console.log("Salvando no Supabase", { table: "fixed_costs", action: "delete", id });
   const { error } = await requireSupabase().from("fixed_costs").delete().eq("id", id);
-  if (error) throw error;
-};
-
-export const syncPendingOperations = async () => {
-  const operations = readQueue();
-  if (!operations.length) return;
-
-  const remaining: QueueOperation[] = [];
-  for (const operation of operations) {
-    try {
-      if (operation.type === "upsert-carrier") await upsertCarrierOnline(operation.carrier);
-      if (operation.type === "upsert-entry") await upsertEntryOnline(operation.entry);
-      if (operation.type === "upsert-cost") await upsertFixedCostOnline(operation.cost);
-      if (operation.type === "delete-cost") await deleteFixedCostOnline(operation.id);
-    } catch {
-      remaining.push(operation);
-    }
-  }
-  writeQueue(remaining);
-};
-
-const migrateLegacyData = async () => {
-  if (localStorage.getItem(MIGRATION_KEY) === "true") return;
-
-  const legacy = legacySnapshot();
-  const carriersToMigrate = legacy.carriers.length ? legacy.carriers : [];
-  const entriesToMigrate = Object.values(legacy.entries || {});
-  const costsToMigrate = legacy.fixedCosts || [];
-
-  await Promise.all(carriersToMigrate.map(upsertCarrierOnline));
-  await Promise.all(entriesToMigrate.map(upsertEntryOnline));
-  await Promise.all(costsToMigrate.map(upsertFixedCostOnline));
-
-  localStorage.setItem(MIGRATION_KEY, "true");
+  if (error) logError("Erro ao remover custo fixo no Supabase", error);
 };
 
 const seedDefaultCarriersIfEmpty = async () => {
   const { count, error } = await requireSupabase().from("carriers").select("id", { count: "exact", head: true });
-  if (error) throw error;
+  if (error) logError("Erro ao verificar transportadoras no Supabase", error);
   if ((count || 0) > 0) return;
   await Promise.all(defaultCarriers.map(upsertCarrierOnline));
 };
 
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
-  const cached = readCache();
-
   try {
-    await migrateLegacyData();
     await seedDefaultCarriersIfEmpty();
-    await syncPendingOperations();
 
     const [carriersResult, entriesResult, costsResult] = await Promise.all([
       requireSupabase().from("carriers").select("*").order("name", { ascending: true }),
@@ -163,9 +85,9 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
       requireSupabase().from("fixed_costs").select("*").order("month", { ascending: true })
     ]);
 
-    if (carriersResult.error) throw carriersResult.error;
-    if (entriesResult.error) throw entriesResult.error;
-    if (costsResult.error) throw costsResult.error;
+    if (carriersResult.error) logError("Erro ao carregar transportadoras do Supabase", carriersResult.error);
+    if (entriesResult.error) logError("Erro ao carregar lancamentos do Supabase", entriesResult.error);
+    if (costsResult.error) logError("Erro ao carregar custos do Supabase", costsResult.error);
 
     const snapshot: FinanceSnapshot = {
       carriers: sortCarriersByName(
@@ -199,15 +121,16 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
       }))
     };
 
-    writeCache(snapshot);
+    console.log("Dados carregados do Supabase", {
+      carriers: snapshot.carriers.length,
+      entries: Object.keys(snapshot.entries).length,
+      fixedCosts: snapshot.fixedCosts.length
+    });
+
     return snapshot;
-  } catch {
-    if (cached.carriers.length || Object.keys(cached.entries).length || cached.fixedCosts.length) return cached;
-    return {
-      carriers: sortCarriersByName(defaultCarriers),
-      entries: {},
-      fixedCosts: []
-    };
+  } catch (error) {
+    console.error("Erro completo ao carregar dados do Supabase", error);
+    throw error;
   }
 };
 
@@ -216,20 +139,12 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
     ...carrier,
     id: "id" in carrier && carrier.id ? carrier.id : makeId()
   };
-  try {
-    await upsertCarrierOnline(completeCarrier);
-  } catch {
-    queueOperation({ type: "upsert-carrier", carrier: completeCarrier });
-  }
+  await upsertCarrierOnline(completeCarrier);
   return completeCarrier;
 };
 
 export const saveDailyEntry = async (entry: DailyEntry) => {
-  try {
-    await upsertEntryOnline(entry);
-  } catch {
-    queueOperation({ type: "upsert-entry", entry });
-  }
+  await upsertEntryOnline(entry);
 };
 
 export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => {
@@ -237,20 +152,6 @@ export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => 
     ...cost,
     id: "id" in cost && cost.id ? cost.id : makeId()
   };
-  try {
-    await upsertFixedCostOnline(completeCost);
-  } catch {
-    queueOperation({ type: "upsert-cost", cost: completeCost });
-  }
+  await upsertFixedCostOnline(completeCost);
   return completeCost;
 };
-
-export const deleteFixedCost = async (id: string) => {
-  try {
-    await deleteFixedCostOnline(id);
-  } catch {
-    queueOperation({ type: "delete-cost", id });
-  }
-};
-
-export const cacheFinanceData = writeCache;

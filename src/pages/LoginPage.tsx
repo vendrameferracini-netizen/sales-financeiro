@@ -30,6 +30,9 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
       }
 
       onLogin();
+    } catch (loginError) {
+      console.error("Erro completo no login Supabase", loginError);
+      setError(loginError instanceof Error ? loginError.message : "Erro ao acessar o Supabase.");
     } finally {
       setSubmitting(false);
     }
@@ -52,6 +55,9 @@ export const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
       setConfirmPassword("");
       setShowPasswordForm(false);
       setMessage(result.message);
+    } catch (changeError) {
+      console.error("Erro completo ao trocar senha no Supabase", changeError);
+      setError(changeError instanceof Error ? changeError.message : "Erro ao salvar senha no Supabase.");
     } finally {
       setSubmitting(false);
     }
