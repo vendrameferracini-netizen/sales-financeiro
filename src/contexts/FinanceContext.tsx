@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
-import { loadCarriers, loadEntries, loadFixedCosts, saveCarriers, saveEntries, saveFixedCosts } from "../utils/storage";
+import { loadCarriers, loadEntries, loadFixedCosts, saveCarriers, saveEntries, saveFixedCosts, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
   carriers: Carrier[];
@@ -17,7 +17,7 @@ type FinanceContextValue = {
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
-  const [carriers, setCarriers] = useState<Carrier[]>(() => loadCarriers());
+  const [carriers, setCarriers] = useState<Carrier[]>(() => sortCarriersByName(loadCarriers()));
   const [entries, setEntries] = useState<Record<string, DailyEntry>>(() => loadEntries());
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => loadFixedCosts());
 
@@ -52,16 +52,18 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         }));
       },
       addCarrier: (carrier) => {
-        setCarriers((current) => [
-          ...current,
-          {
-            ...carrier,
-            id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
-          }
-        ]);
+        setCarriers((current) =>
+          sortCarriersByName([
+            ...current,
+            {
+              ...carrier,
+              id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+            }
+          ])
+        );
       },
       updateCarrier: (carrier) => {
-        setCarriers((current) => current.map((item) => (item.id === carrier.id ? carrier : item)));
+        setCarriers((current) => sortCarriersByName(current.map((item) => (item.id === carrier.id ? carrier : item))));
       },
       addFixedCost: (cost) => {
         setFixedCosts((current) => [

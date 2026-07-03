@@ -1,5 +1,5 @@
 import { Edit3, Plus, Save, X } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
@@ -36,6 +36,8 @@ const carrierToForm = (carrier: Carrier): CarrierForm => ({
 export const CarriersPage = () => {
   const { carriers, addCarrier, updateCarrier } = useFinance();
   const [form, setForm] = useState<CarrierForm>(blankForm);
+  const [message, setMessage] = useState("");
+  const formPanelRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!form.id) return;
@@ -46,6 +48,12 @@ export const CarriersPage = () => {
   const editing = Boolean(form.id);
 
   const reset = () => setForm(blankForm);
+
+  const handleEdit = (carrier: Carrier) => {
+    setForm(carrierToForm(carrier));
+    setMessage("");
+    requestAnimationFrame(() => formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -64,8 +72,10 @@ export const CarriersPage = () => {
 
     if (form.id) {
       updateCarrier({ id: form.id, ...carrierPayload });
+      setMessage("Transportadora atualizada com sucesso.");
     } else {
       addCarrier(carrierPayload);
+      setMessage("Transportadora cadastrada com sucesso.");
     }
     reset();
   };
@@ -82,7 +92,7 @@ export const CarriersPage = () => {
         ]}
       />
 
-      <section className="form-panel">
+      <section className="form-panel" ref={formPanelRef}>
         <h2>{editing ? "Editar transportadora" : "Nova transportadora"}</h2>
         <form className="carrier-form" onSubmit={submit}>
           <label>
@@ -111,13 +121,21 @@ export const CarriersPage = () => {
               {editing ? "Salvar" : "Cadastrar"}
             </button>
             {editing && (
-              <button className="secondary-button" type="button" onClick={reset}>
+              <button className="secondary-button" type="button" onClick={() => {
+                reset();
+                setMessage("");
+              }}>
                 <X size={18} />
                 Cancelar
               </button>
             )}
           </div>
         </form>
+        {message && (
+          <p className="feedback-message" role="status" aria-live="polite">
+            {message}
+          </p>
+        )}
       </section>
 
       <ResponsiveTable
@@ -128,7 +146,7 @@ export const CarriersPage = () => {
           currency(carrier.rates.shopee),
           currency(carrier.rates.avulso),
           carrier.active ? "Ativa" : "Inativa",
-          <button className="secondary-button compact" onClick={() => setForm(carrierToForm(carrier))}>
+          <button className="secondary-button compact" type="button" onClick={() => handleEdit(carrier)}>
             <Edit3 size={18} />
             Editar
           </button>
