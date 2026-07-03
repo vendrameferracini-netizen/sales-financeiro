@@ -1,4 +1,4 @@
-import { BarChart3, CalendarDays, Clock3, DollarSign, FileText, Menu, TrendingUp, Truck, Wallet, X } from "lucide-react";
+import { BarChart3, CalendarDays, Clock3, DollarSign, FileText, LogOut, Menu, TrendingUp, Truck, Wallet, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 
 export type PageKey = "daily" | "weekly" | "fortnightly" | "monthly" | "costs" | "profit" | "carriers";
@@ -16,10 +16,12 @@ const navItems = [
 export const Layout = ({
   activePage,
   setActivePage,
+  onLogout,
   children
 }: {
   activePage: PageKey;
   setActivePage: (page: PageKey) => void;
+  onLogout: () => void;
   children: ReactNode;
 }) => {
   const [open, setOpen] = useState(false);
@@ -45,6 +47,19 @@ export const Layout = ({
     </nav>
   );
 
+  const logoutButton = (
+    <button
+      className="nav-item logout-item"
+      onClick={() => {
+        setOpen(false);
+        onLogout();
+      }}
+    >
+      <LogOut size={19} />
+      <span>Sair</span>
+    </button>
+  );
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -58,6 +73,7 @@ export const Layout = ({
           </div>
         </div>
         {nav}
+        <div className="sidebar-footer">{logoutButton}</div>
       </aside>
 
       <header className="mobile-topbar">
@@ -83,6 +99,7 @@ export const Layout = ({
               </div>
             </div>
             {nav}
+            <div className="sidebar-footer">{logoutButton}</div>
           </div>
         </div>
       )}
