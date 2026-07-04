@@ -1,4 +1,4 @@
-import { defaultCarriers, salesCarrierNames } from "../data/carriers";
+import { blockedLegacyCarrierNames, defaultCarriers } from "../data/carriers";
 import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
@@ -20,7 +20,16 @@ const errorDetails = (error: unknown) => error as { message?: unknown; details?:
 
 const getSupabaseErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) return String((error as { message?: unknown }).message);
+  if (typeof error === "object" && error !== null) {
+    const details = errorDetails(error);
+    const parts = [
+      details.code ? `code: ${String(details.code)}` : "",
+      details.message ? `message: ${String(details.message)}` : "",
+      details.details ? `details: ${String(details.details)}` : "",
+      details.hint ? `hint: ${String(details.hint)}` : ""
+    ].filter(Boolean);
+    if (parts.length) return parts.join(" | ");
+  }
   return fallback;
 };
 
@@ -98,7 +107,7 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 const salesCompany = { id: COMPANY_ID };
 const normalizeName = (name: string) => name.trim().toLowerCase();
 const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
-const salesCarrierNameSet = new Set(salesCarrierNames.map(normalizeName));
+const blockedLegacyCarrierNameSet = new Set(blockedLegacyCarrierNames.map(normalizeName));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
@@ -112,8 +121,41 @@ const rowCompanyPayload = () => ({
   company_id: COMPANY_ID
 });
 
+const allCarrierColumnPayload = (carrier: Carrier) => ({
+  id: carrier.id,
+  app_id: APP_ID,
+  company_id: COMPANY_ID,
+  id_da_empresa: COMPANY_ID,
+  name: carrier.name,
+  nome: carrier.name,
+  carrier_name: carrier.name,
+  ml: Number(carrier.rates.ml) || 0,
+  valor_ml: Number(carrier.rates.ml) || 0,
+  mercado_livre: Number(carrier.rates.ml) || 0,
+  value_ml: Number(carrier.rates.ml) || 0,
+  rate_ml: Number(carrier.rates.ml) || 0,
+  ml_rate: Number(carrier.rates.ml) || 0,
+  price_ml: Number(carrier.rates.ml) || 0,
+  shopee: Number(carrier.rates.shopee) || 0,
+  valor_shopee: Number(carrier.rates.shopee) || 0,
+  value_shopee: Number(carrier.rates.shopee) || 0,
+  rate_shopee: Number(carrier.rates.shopee) || 0,
+  shopee_rate: Number(carrier.rates.shopee) || 0,
+  price_shopee: Number(carrier.rates.shopee) || 0,
+  avulso: Number(carrier.rates.avulso) || 0,
+  valor_avulso: Number(carrier.rates.avulso) || 0,
+  value_avulso: Number(carrier.rates.avulso) || 0,
+  rate_avulso: Number(carrier.rates.avulso) || 0,
+  avulso_rate: Number(carrier.rates.avulso) || 0,
+  price_avulso: Number(carrier.rates.avulso) || 0,
+  active: carrier.active ?? true,
+  ativo: carrier.active ?? true,
+  status: carrier.active ?? true,
+  updated_at: new Date().toISOString()
+});
+
 const carrierToFullRow = (carrier: Carrier) => ({
-  ...rowCompanyPayload(),
+  company_id: COMPANY_ID,
   id: carrier.id,
   name: carrier.name,
   ml: Number(carrier.rates.ml) || 0,
@@ -195,10 +237,28 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
-const isOfficialSalesCarrierName = (name: string) => salesCarrierNameSet.has(normalizeName(name));
-const isOfficialSalesCarrierRow = (row: DbRow) => isOfficialSalesCarrierName(text(row, ["name", "nome", "carrier_name"], ""));
+const isBlockedLegacyCarrierRow = (row: DbRow) => blockedLegacyCarrierNameSet.has(normalizeName(text(row, ["name", "nome", "carrier_name"], "")));
 
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
+
+const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
+  Object.fromEntries(Object.entries(payload).filter(([key]) => columns.includes(key) && payload[key] !== undefined));
+
+const carrierPayloadForColumns = (carrier: Carrier, columns: string[]) => {
+  const payload = filterPayloadByColumns(allCarrierColumnPayload(carrier), columns);
+  if (!("name" in payload) && !("nome" in payload) && !("carrier_name" in payload)) payload.name = carrier.name;
+  if (!("company_id" in payload) && !("id_da_empresa" in payload)) payload.company_id = COMPANY_ID;
+  if (columns.length === 0 && !("id" in payload)) payload.id = carrier.id;
+  return payload;
+};
+
+const getCarrierColumns = async () => {
+  const result = await runSupabase<DbRow[]>("carriers", "select_schema_for_save", { company_id: COMPANY_ID }, () =>
+    requireSupabase().from("carriers").select("*").limit(1)
+  );
+  const first = (result.data || [])[0];
+  return first ? Object.keys(first) : [];
+};
 
 const deletePackageEntriesForCarrierIds = async (carrierIds: string[], operation: string) =>
   runSupabase(
@@ -224,8 +284,8 @@ const deleteCarriersByIds = async (carrierIds: string[], operation: string) =>
     () => requireSupabase().from("carriers").delete().eq("company_id", COMPANY_ID).in("id", carrierIds)
   );
 
-const cleanupNonSalesCarriers = async (rows: DbRow[]) => {
-  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && !isOfficialSalesCarrierRow(row));
+const cleanupLegacyCarriers = async (rows: DbRow[]) => {
+  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && isBlockedLegacyCarrierRow(row));
   const foreignIds = [...new Set(foreignRows.map((row) => text(row, ["id", "carrier_id"])).filter(Boolean))];
   if (!foreignIds.length) return;
 
@@ -285,15 +345,15 @@ const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) =
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
-  await cleanupNonSalesCarriers((data || []) as DbRow[]);
-  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isOfficialSalesCarrierRow(row));
+  await cleanupLegacyCarriers((data || []) as DbRow[]);
+  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedLegacyCarrierRow(row));
   const carriers = sortCarriersByName(rows.map(rowToCarrier));
   await seedMissingDefaultCarriers(company, carriers);
   if (carriers.length >= defaultCarriers.length) return carriers;
 
   const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if (refreshed.error) return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
-  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isOfficialSalesCarrierRow(row)).map(rowToCarrier));
+  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedLegacyCarrierRow(row)).map(rowToCarrier));
   return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
 };
 
@@ -376,59 +436,51 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
 export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
   const carrierId = "id" in carrier && carrier.id ? carrier.id : "";
   const isUpdate = Boolean(carrierId);
-  if (!isOfficialSalesCarrierName(carrier.name)) {
-    throw new SupabaseOperationError(
-      "carriers",
-      isUpdate ? "update" : "insert",
-      { company_id: COMPANY_ID, app_id: APP_ID, name: carrier.name },
-      `Transportadora "${carrier.name}" nao pertence a lista oficial do Sales.`
-    );
-  }
-
   const completeCarrier: Carrier = {
     ...carrier,
     id: carrierId || makeId()
   };
 
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
-  const fullPayload = carrierToFullRow(completeCarrier);
-  const scopedPayload = carrierToScopedFullRow(completeCarrier);
+  const minimalPayload = carrierToMinimalRow(completeCarrier);
+  const columns = await getCarrierColumns();
+  const schemaPayload = carrierPayloadForColumns(completeCarrier, columns);
   const operation = isUpdate ? "update" : "insert";
   let result = isUpdate
     ? await runSupabase<DbRow>(
         "carriers",
         "update",
-        scopedPayload,
-        () => requireSupabase().from("carriers").update(scopedPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle()
+        schemaPayload,
+        () => requireSupabase().from("carriers").update(schemaPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle()
       )
     : await runSupabase<DbRow>(
         "carriers",
         "insert",
-        scopedPayload,
-        () => requireSupabase().from("carriers").insert(scopedPayload).select("*").maybeSingle()
+        schemaPayload,
+        () => requireSupabase().from("carriers").insert(schemaPayload).select("*").maybeSingle()
       );
 
-  if (result.error && isMissingColumnError(result.error, "app_id")) {
+  if (result.error && (isMissingColumnError(result.error, "app_id") || isMissingColumnError(result.error, "updated_at") || isMissingColumnError(result.error, "active"))) {
     result = isUpdate
       ? await runSupabase<DbRow>(
           "carriers",
           "update_without_app_id",
-          fullPayload,
-          () => requireSupabase().from("carriers").update(fullPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
+          minimalPayload,
+          () => requireSupabase().from("carriers").update(minimalPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
           { throwOnError: true }
         )
       : await runSupabase<DbRow>(
           "carriers",
           "insert_without_app_id",
-          fullPayload,
-          () => requireSupabase().from("carriers").insert(fullPayload).select("*").maybeSingle(),
+          minimalPayload,
+          () => requireSupabase().from("carriers").insert(minimalPayload).select("*").maybeSingle(),
           { throwOnError: true }
         );
   } else if (result.error) {
-    throw new SupabaseOperationError("carriers", operation, scopedPayload, result.error);
+    throw new SupabaseOperationError("carriers", operation, schemaPayload, result.error);
   }
 
-  if (!result.data) throw new SupabaseOperationError("carriers", operation, scopedPayload, "Supabase nao retornou a transportadora salva.");
+  if (!result.data) throw new SupabaseOperationError("carriers", operation, schemaPayload, "Supabase nao retornou a transportadora salva.");
   return rowToCarrier(result.data);
 };
 

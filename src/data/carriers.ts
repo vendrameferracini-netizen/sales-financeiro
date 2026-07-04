@@ -27,3 +27,12 @@ export const defaultCarriers: Carrier[] = [
 ];
 
 export const salesCarrierNames = defaultCarriers.map((carrier) => carrier.name);
+
+export const blockedLegacyCarrierNames = [
+  "Amanda",
+  "Antonio",
+  "AR4",
+  "Disk Flex",
+  "Flash-TLG",
+  "Flash TLG"
+];
