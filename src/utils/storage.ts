@@ -154,7 +154,6 @@ const allCarrierColumnPayload = (carrier: Carrier) => ({
   price_avulso: Number(carrier.rates.avulso) || 0,
   active: carrier.active ?? true,
   ativo: carrier.active ?? true,
-  status: carrier.active ?? true,
   updated_at: new Date().toISOString()
 });
 
