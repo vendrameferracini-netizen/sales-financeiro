@@ -1,5 +1,5 @@
 import { defaultCarriers } from "../data/carriers";
-import { APP_ID, COMPANY_ID, COMPANY_NAME } from "../data/app";
+import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
 
@@ -115,7 +115,8 @@ const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalize
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
-  const appMatches = appValue === undefined || appValue === null || appValue === "" || String(appValue) === APP_ID;
+  const hasAppColumn = Object.prototype.hasOwnProperty.call(row, "app_id");
+  const appMatches = !hasAppColumn || String(appValue || "") === APP_ID;
   const companyValue = row.company_id !== undefined ? row.company_id : row.id_da_empresa;
   const companyMatchesValue = companyValue === undefined || String(companyValue) === String(company.id);
   return appMatches && companyMatchesValue;
@@ -171,11 +172,6 @@ const carrierToFullRow = (carrier: Carrier) => ({
 const carrierToScopedFullRow = (carrier: Carrier) => ({
   ...carrierToFullRow(carrier),
   app_id: APP_ID
-});
-
-const carrierToMinimalRow = (carrier: Carrier) => ({
-  company_id: COMPANY_ID,
-  name: carrier.name
 });
 
 const rowToCarrier = (row: DbRow): Carrier => {
@@ -251,49 +247,6 @@ const getCarrierColumns = async () => {
   return first ? Object.keys(first) : [];
 };
 
-const ensureSalesCompany = async () => {
-  const existing = await runSupabase<DbRow>("companies", "select_sales_company", { id: COMPANY_ID }, () =>
-    requireSupabase().from("companies").select("*").eq("id", COMPANY_ID).maybeSingle()
-  );
-  if (existing.data) return;
-
-  console.log("Salvando no Supabase", { table: "companies", action: "ensure_sales_company", id: COMPANY_ID });
-  const schemaResult = await runSupabase<DbRow[]>("companies", "select_schema_for_sales_company", { id: COMPANY_ID }, () =>
-    requireSupabase().from("companies").select("*").limit(1)
-  );
-  const sampleCompany = (schemaResult.data || [])[0] || {};
-  const schemaPayload: DbRow = { id: COMPANY_ID };
-  if ("name" in sampleCompany) schemaPayload.name = COMPANY_NAME;
-  if ("company_name" in sampleCompany) schemaPayload.company_name = COMPANY_NAME;
-  if ("nome" in sampleCompany) schemaPayload.nome = COMPANY_NAME;
-  if ("status" in sampleCompany && sampleCompany.status !== undefined && sampleCompany.status !== null) schemaPayload.status = sampleCompany.status;
-
-  const attempts = [
-    schemaPayload,
-    { id: COMPANY_ID, name: COMPANY_NAME, status: "active" },
-    { id: COMPANY_ID, name: COMPANY_NAME, status: "ativo" },
-    { id: COMPANY_ID, name: COMPANY_NAME, status: "ATIVO" },
-    { id: COMPANY_ID, name: COMPANY_NAME, status: "ACTIVE" },
-    { id: COMPANY_ID, name: COMPANY_NAME, status: "enabled" },
-    { id: COMPANY_ID, company_name: COMPANY_NAME, status: "active" },
-    { id: COMPANY_ID, nome: COMPANY_NAME, status: "active" },
-    { id: COMPANY_ID, name: COMPANY_NAME },
-    { id: COMPANY_ID, company_name: COMPANY_NAME },
-    { id: COMPANY_ID, nome: COMPANY_NAME },
-    { id: COMPANY_ID }
-  ];
-
-  let lastError: unknown = existing.error;
-  for (const payload of attempts) {
-    const created = await runSupabase("companies", "insert_sales_company", payload, () => requireSupabase().from("companies").insert(payload));
-    if (!created.error) return;
-    lastError = created.error;
-    if (errorTextContent(created.error).toLowerCase().includes("duplicate")) return;
-  }
-
-  throw new SupabaseOperationError("companies", "insert_sales_company", attempts, lastError || "Nao foi possivel criar a empresa Sales Financeiro.");
-};
-
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
@@ -359,7 +312,6 @@ const auditSupportingTables = async () => {
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
   try {
     const company = salesCompany;
-    await ensureSalesCompany();
     const carriers = await loadCarriers(company);
     const [entries, fixedCosts] = await Promise.all([loadEntries(company), loadFixedCosts(company), auditSupportingTables()]);
 
@@ -386,9 +338,7 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
     id: carrierId || makeId()
   };
 
-  await ensureSalesCompany();
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
-  const minimalPayload = carrierToMinimalRow(completeCarrier);
   const columns = await getCarrierColumns();
   const schemaPayload = carrierPayloadForColumns(completeCarrier, columns);
   const operation = isUpdate ? "update" : "insert";
@@ -407,19 +357,26 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
       );
 
   if (result.error && (isMissingColumnError(result.error, "app_id") || isMissingColumnError(result.error, "updated_at") || isMissingColumnError(result.error, "active"))) {
+    const fallbackPayload = { ...schemaPayload };
+    if (isMissingColumnError(result.error, "app_id")) delete fallbackPayload.app_id;
+    if (isMissingColumnError(result.error, "updated_at")) delete fallbackPayload.updated_at;
+    if (isMissingColumnError(result.error, "active")) {
+      delete fallbackPayload.active;
+      delete fallbackPayload.ativo;
+    }
     result = isUpdate
       ? await runSupabase<DbRow>(
           "carriers",
           "update_without_app_id",
-          minimalPayload,
-          () => requireSupabase().from("carriers").update(minimalPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
+          fallbackPayload,
+          () => requireSupabase().from("carriers").update(fallbackPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
           { throwOnError: true }
         )
       : await runSupabase<DbRow>(
           "carriers",
           "insert_without_app_id",
-          minimalPayload,
-          () => requireSupabase().from("carriers").insert(minimalPayload).select("*").maybeSingle(),
+          fallbackPayload,
+          () => requireSupabase().from("carriers").insert(fallbackPayload).select("*").maybeSingle(),
           { throwOnError: true }
         );
   } else if (result.error) {
