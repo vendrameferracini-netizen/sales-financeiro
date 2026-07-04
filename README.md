@@ -17,8 +17,8 @@ Sistema financeiro e operacional para controle de pacotes de subbase/transportad
 ## Como rodar no computador
 
 1. Instale o Node.js LTS.
-2. Crie um projeto no Supabase.
-3. No SQL Editor do Supabase, execute o arquivo `supabase-schema.sql`.
+2. Crie um projeto novo no Supabase exclusivo para o FINANCEIRO SALLES.
+3. No SQL Editor desse projeto novo, execute o arquivo `supabase-schema.sql`.
 4. Crie um arquivo `.env` baseado em `.env.example`:
 
 ```text
@@ -88,6 +88,8 @@ Importante: para funcionar como PWA instalavel, publique em HTTPS.
 
 ## Supabase
 
+Use um Supabase exclusivo para este app. Nao reutilize o banco de outro sistema.
+
 O app usa Supabase para:
 
 - Transportadoras
@@ -100,6 +102,21 @@ O app usa Supabase para:
 As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
 
 O Supabase e obrigatorio. Sem `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`, o app mostra erro visual e nao grava dados localmente.
+
+O arquivo `supabase-schema.sql` cria um banco limpo para o Sales Financeiro:
+
+- cria as tabelas do zero se ainda nao existirem;
+- cria a empresa `Sales Financeiro`;
+- cria o login inicial;
+- nao cria nenhuma transportadora;
+- nao cria lancamentos, custos ou historico.
+
+Depois de executar o SQL, atualize a Vercel para usar as variaveis do projeto Supabase novo:
+
+```text
+VITE_SUPABASE_URL=https://seu-projeto-sales.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-chave-anon-public
+```
 
 Tabelas usadas pelo app:
 
@@ -186,6 +203,7 @@ Use a aba Transportadoras para:
 - Editar nome e valores
 - Ativar ou inativar transportadora
 
+O sistema comeca sem transportadoras. Cadastre manualmente as transportadoras desejadas.
 Transportadoras ativas aparecem no Lancamento Diario.
 Transportadoras inativas continuam preservadas nos dados antigos.
 

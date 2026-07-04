@@ -1,4 +1,3 @@
-import { defaultCarriers } from "../data/carriers";
 import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
@@ -110,8 +109,6 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 };
 
 const salesCompany = { id: COMPANY_ID };
-const normalizeName = (name: string) => name.trim().toLowerCase();
-const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
@@ -123,6 +120,7 @@ const companyMatches = (row: DbRow, company: DbRow) => {
 };
 
 const rowCompanyPayload = () => ({
+  app_id: APP_ID,
   company_id: COMPANY_ID
 });
 
@@ -176,14 +174,13 @@ const carrierToScopedFullRow = (carrier: Carrier) => ({
 
 const rowToCarrier = (row: DbRow): Carrier => {
   const name = text(row, ["name", "nome", "carrier_name"], "Sem nome");
-  const defaults = defaultCarrierByName.get(normalizeName(name));
   return {
-    id: text(row, ["id", "carrier_id"], defaults?.id || makeId()),
+    id: text(row, ["id", "carrier_id"], makeId()),
     name,
     rates: {
-      ml: num(row, ["ml", "valor_ml", "mercado_livre", "value_ml", "rate_ml", "ml_rate", "price_ml"], defaults?.rates.ml || 0),
-      shopee: num(row, ["shopee", "valor_shopee", "value_shopee", "rate_shopee", "shopee_rate", "price_shopee"], defaults?.rates.shopee || 0),
-      avulso: num(row, ["avulso", "valor_avulso", "value_avulso", "rate_avulso", "avulso_rate", "price_avulso"], defaults?.rates.avulso || 0)
+      ml: num(row, ["ml", "valor_ml", "mercado_livre", "value_ml", "rate_ml", "ml_rate", "price_ml"]),
+      shopee: num(row, ["shopee", "valor_shopee", "value_shopee", "rate_shopee", "shopee_rate", "price_shopee"]),
+      avulso: num(row, ["avulso", "valor_avulso", "value_avulso", "rate_avulso", "avulso_rate", "price_avulso"])
     },
     active: bool(row, ["active", "ativo", "status"], true)
   };
@@ -226,12 +223,14 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
-const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
+const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID);
 
 const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
   Object.fromEntries(Object.entries(payload).filter(([key]) => columns.includes(key) && payload[key] !== undefined));
 
 const carrierPayloadForColumns = (carrier: Carrier, columns: string[]) => {
+  if (columns.length === 0) return carrierToScopedFullRow(carrier);
+
   const payload = filterPayloadByColumns(allCarrierColumnPayload(carrier), columns);
   delete payload.ativo;
   if (!("name" in payload) && !("nome" in payload) && !("carrier_name" in payload)) payload.name = carrier.name;
@@ -349,7 +348,15 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
         "carriers",
         "update",
         schemaPayload,
-        () => requireSupabase().from("carriers").update(schemaPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle()
+        () =>
+          requireSupabase()
+            .from("carriers")
+            .update(schemaPayload)
+            .eq("id", completeCarrier.id)
+            .eq("company_id", COMPANY_ID)
+            .eq("app_id", APP_ID)
+            .select("*")
+            .maybeSingle()
       )
     : await runSupabase<DbRow>(
         "carriers",
@@ -377,7 +384,15 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
           "carriers",
           "update_without_app_id",
           fallbackPayload,
-          () => requireSupabase().from("carriers").update(fallbackPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
+          () =>
+            requireSupabase()
+              .from("carriers")
+              .update(fallbackPayload)
+              .eq("id", completeCarrier.id)
+              .eq("company_id", COMPANY_ID)
+              .eq("app_id", APP_ID)
+              .select("*")
+              .maybeSingle(),
           { throwOnError: true }
         )
       : await runSupabase<DbRow>(
@@ -400,8 +415,8 @@ export const deleteCarrier = async (id: string) => {
   const result = await runSupabase(
     "carriers",
     "delete",
-    { id, company_id: COMPANY_ID },
-    () => requireSupabase().from("carriers").delete().eq("id", id).eq("company_id", COMPANY_ID)
+    { id, app_id: APP_ID, company_id: COMPANY_ID },
+    () => requireSupabase().from("carriers").delete().eq("id", id).eq("company_id", COMPANY_ID).eq("app_id", APP_ID)
   );
   if (result.error) {
     if (isForeignKeyError(result.error)) {
@@ -466,5 +481,11 @@ export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => 
 
 export const deleteFixedCost = async (id: string) => {
   console.log("Salvando no Supabase", { table: "fixed_costs", action: "delete", id });
-  await runSupabase("fixed_costs", "delete", { id }, () => requireSupabase().from("fixed_costs").delete().eq("id", id), { throwOnError: true });
+  await runSupabase(
+    "fixed_costs",
+    "delete",
+    { id, app_id: APP_ID, company_id: COMPANY_ID },
+    () => requireSupabase().from("fixed_costs").delete().eq("id", id).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
+    { throwOnError: true }
+  );
 };
