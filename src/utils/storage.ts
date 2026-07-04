@@ -154,7 +154,7 @@ const allCarrierColumnPayload = (carrier: Carrier) => ({
   avulso_rate: Number(carrier.rates.avulso) || 0,
   price_avulso: Number(carrier.rates.avulso) || 0,
   active: carrier.active ?? true,
-  ativo: carrier.active ?? true,
+  status: carrier.active === false ? "inativo" : "ativo",
   updated_at: new Date().toISOString()
 });
 
@@ -233,6 +233,7 @@ const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
 
 const carrierPayloadForColumns = (carrier: Carrier, columns: string[]) => {
   const payload = filterPayloadByColumns(allCarrierColumnPayload(carrier), columns);
+  delete payload.ativo;
   if (!("name" in payload) && !("nome" in payload) && !("carrier_name" in payload)) payload.name = carrier.name;
   if (!("company_id" in payload) && !("id_da_empresa" in payload)) payload.company_id = COMPANY_ID;
   if (columns.length === 0 && !("id" in payload)) payload.id = carrier.id;
@@ -341,6 +342,7 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
   const columns = await getCarrierColumns();
   const schemaPayload = carrierPayloadForColumns(completeCarrier, columns);
+  console.log("Payload enviado ao Supabase", { table: "carriers", operation: isUpdate ? "update" : "insert", payload: schemaPayload });
   const operation = isUpdate ? "update" : "insert";
   let result = isUpdate
     ? await runSupabase<DbRow>(
@@ -356,13 +358,19 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
         () => requireSupabase().from("carriers").insert(schemaPayload).select("*").maybeSingle()
       );
 
-  if (result.error && (isMissingColumnError(result.error, "app_id") || isMissingColumnError(result.error, "updated_at") || isMissingColumnError(result.error, "active"))) {
+  if (
+    result.error &&
+    (isMissingColumnError(result.error, "app_id") ||
+      isMissingColumnError(result.error, "updated_at") ||
+      isMissingColumnError(result.error, "active") ||
+      isMissingColumnError(result.error, "status"))
+  ) {
     const fallbackPayload = { ...schemaPayload };
     if (isMissingColumnError(result.error, "app_id")) delete fallbackPayload.app_id;
     if (isMissingColumnError(result.error, "updated_at")) delete fallbackPayload.updated_at;
+    if (isMissingColumnError(result.error, "status")) delete fallbackPayload.status;
     if (isMissingColumnError(result.error, "active")) {
       delete fallbackPayload.active;
-      delete fallbackPayload.ativo;
     }
     result = isUpdate
       ? await runSupabase<DbRow>(
