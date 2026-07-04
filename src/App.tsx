@@ -7,7 +7,7 @@ import { CostsPage } from "./pages/CostsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RealProfitPage } from "./pages/RealProfitPage";
 import { FortnightlyPage, MonthlyPage, WeeklyPage } from "./pages/SummaryPages";
-import { isSupabaseConfigured } from "./utils/supabase";
+import { isSupabaseConfigured, supabaseConfigError } from "./utils/supabase";
 
 const pages: Record<PageKey, ReactNode> = {
   daily: <DailyEntryPage />,
@@ -49,7 +49,7 @@ export const App = () => {
           <p className="eyebrow">SUPABASE NAO CONFIGURADO</p>
           <h1>Configure o banco de dados</h1>
           <p className="auth-message error">
-            Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY na Vercel. Sem essas variaveis, o app nao salva nem carrega dados online.
+            {supabaseConfigError || "Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY na Vercel."} Sem essas variaveis, o app nao salva nem carrega dados online.
           </p>
         </section>
       </main>
