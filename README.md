@@ -95,7 +95,7 @@ O app usa Supabase para:
 - Custos fixos
 - Empresas
 - Pacotes diarios
-- Login e senha na tabela `profiles`
+- Login e senha na tabela `app_login`
 
 As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
 
@@ -111,6 +111,13 @@ package_entries
 fixed_costs
 costs
 profiles
+app_login
+```
+
+Depois do login, o app usa o `company_id` fixo:
+
+```text
+11111111-1111-1111-1111-111111111111
 ```
 
 Credenciais iniciais:
@@ -120,7 +127,7 @@ Login: salesfinanceiro
 Senha: Sales123
 ```
 
-A senha inicial e as trocas de senha sao armazenadas em `profiles.senha_hash` ou `profiles.password_hash` usando bcrypt, conforme a coluna existente no banco.
+A senha inicial e as trocas de senha sao armazenadas em `app_login.senha_hash` usando bcrypt.
 
 ## Como transformar em APK Android
 

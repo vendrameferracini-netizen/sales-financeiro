@@ -1,5 +1,5 @@
 import { defaultCarriers } from "../data/carriers";
-import { APP_ID } from "../data/app";
+import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
 
@@ -39,21 +39,7 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
   return fallback;
 };
 
-const maybe = <T,>(value: T | undefined | null) => (value === undefined || value === null || value === "" ? undefined : value);
-
-const getSalesCompany = async () => {
-  const { data, error } = await requireSupabase().from("companies").select("*");
-  if (error) logError("Erro ao carregar empresa no Supabase", error);
-  const rows = (data || []) as DbRow[];
-  const company =
-    rows.find((row) => [row.app_id, row.slug, row.code, row.codigo].some((value) => String(value || "").toLowerCase() === APP_ID)) ||
-    rows.find((row) => String(row.name || row.nome || "").toLowerCase().includes("sales")) ||
-    rows[0];
-
-  if (!company) throw new Error("Nenhuma empresa encontrada na tabela companies.");
-  console.log("Dados carregados do Supabase", { table: "companies", id: company.id, app_id: APP_ID });
-  return company;
-};
+const salesCompany = { id: COMPANY_ID };
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   if (row.company_id !== undefined) return String(row.company_id) === String(company.id);
@@ -62,12 +48,12 @@ const companyMatches = (row: DbRow, company: DbRow) => {
   return true;
 };
 
-const rowCompanyPayload = (company: DbRow) => ({
-  company_id: maybe(text(company, ["id"]))
+const rowCompanyPayload = () => ({
+  company_id: COMPANY_ID
 });
 
-const carrierToRow = (carrier: Carrier, company: DbRow) => ({
-  ...rowCompanyPayload(company),
+const carrierToRow = (carrier: Carrier) => ({
+  ...rowCompanyPayload(),
   id: carrier.id,
   name: carrier.name,
   ml: Number(carrier.rates.ml) || 0,
@@ -88,8 +74,8 @@ const rowToCarrier = (row: DbRow): Carrier => ({
   active: bool(row, ["active", "ativo", "status"], true)
 });
 
-const fixedCostToRow = (cost: FixedCost, company: DbRow) => ({
-  ...rowCompanyPayload(company),
+const fixedCostToRow = (cost: FixedCost) => ({
+  ...rowCompanyPayload(),
   id: cost.id,
   description: cost.description,
   category: cost.category,
@@ -114,8 +100,8 @@ const packageInputFromRow = (row: DbRow): DailyCarrierInput => ({
   avulso: num(row, ["avulso", "avulso_count", "quantidade_avulso"])
 });
 
-const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrierInput, company: DbRow) => ({
-  ...rowCompanyPayload(company),
+const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrierInput) => ({
+  ...rowCompanyPayload(),
   id: makeId(),
   daily_entry_id: dailyEntryId,
   carrier_id: carrierId,
@@ -131,7 +117,7 @@ const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) =
   if (!missing.length) return;
 
   console.log("Salvando no Supabase", { table: "carriers", action: "seed", count: missing.length });
-  const { error } = await requireSupabase().from("carriers").insert(missing.map((carrier) => carrierToRow(carrier, company)));
+  const { error } = await requireSupabase().from("carriers").insert(missing.map((carrier) => carrierToRow(carrier)));
   if (error) logError("Erro ao criar transportadoras iniciais no Supabase", error);
 };
 
@@ -200,12 +186,12 @@ const loadFixedCosts = async (company: DbRow) => {
 
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
   try {
-    const company = await getSalesCompany();
+    const company = salesCompany;
     const [carriers, entries, fixedCosts] = await Promise.all([loadCarriers(company), loadEntries(company), loadFixedCosts(company)]);
 
     console.log("Dados carregados do Supabase", {
       schema: "companies/carriers/daily_entries/package_entries/fixed_costs/costs",
-      company_id: company.id,
+      company_id: COMPANY_ID,
       carriers: carriers.length,
       entries: Object.keys(entries).length,
       fixedCosts: fixedCosts.length
@@ -219,22 +205,21 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
 };
 
 export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
-  const company = await getSalesCompany();
   const completeCarrier: Carrier = {
     ...carrier,
     id: "id" in carrier && carrier.id ? carrier.id : makeId()
   };
 
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id });
-  const { error } = await requireSupabase().from("carriers").upsert(carrierToRow(completeCarrier, company));
+  const { error } = await requireSupabase().from("carriers").upsert(carrierToRow(completeCarrier));
   if (error) logError("Erro ao salvar transportadora no Supabase", error);
   return completeCarrier;
 };
 
 export const saveDailyEntry = async (entry: DailyEntry) => {
-  const company = await getSalesCompany();
+  const company = salesCompany;
   const dailyPayload = {
-    ...rowCompanyPayload(company),
+    ...rowCompanyPayload(),
     date: entry.date,
     updated_at: new Date().toISOString()
   };
@@ -257,7 +242,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 
   const rows = Object.entries(entry.carriers || {})
     .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
-    .map(([carrierId, input]) => packageRow(dailyId, carrierId, input, company));
+    .map(([carrierId, input]) => packageRow(dailyId, carrierId, input));
 
   if (!rows.length) return;
   const insertResult = await requireSupabase().from("package_entries").insert(rows);
@@ -265,14 +250,13 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 };
 
 export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => {
-  const company = await getSalesCompany();
   const completeCost: FixedCost = {
     ...cost,
     id: "id" in cost && cost.id ? cost.id : makeId()
   };
 
   console.log("Salvando no Supabase", { table: "fixed_costs", id: completeCost.id });
-  const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostToRow(completeCost, company));
+  const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostToRow(completeCost));
   if (error) logError("Erro ao salvar custo fixo no Supabase", error);
   return completeCost;
 };
