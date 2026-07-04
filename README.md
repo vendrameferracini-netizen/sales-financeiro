@@ -94,7 +94,7 @@ O app usa Supabase para:
 - Lancamentos diarios
 - Custos fixos
 - Configuracoes
-- Login e senha
+- Login e senha na tabela `app_login`
 
 As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
 
@@ -106,6 +106,8 @@ Credenciais iniciais:
 Login: salesfinanceiro
 Senha: Sales123
 ```
+
+A senha inicial e as trocas de senha sao armazenadas em `app_login.senha_hash` usando bcrypt. Execute `supabase-schema.sql` ou a migration em `supabase/migrations` para criar a tabela e inserir o login inicial.
 
 ## Como transformar em APK Android
 

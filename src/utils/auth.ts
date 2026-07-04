@@ -1,70 +1,60 @@
+import bcrypt from "bcryptjs";
 import { requireSupabase } from "./supabase";
 
-const USERNAME = "salesfinanceiro";
-const DEFAULT_PASSWORD = "Sales123";
+const DEFAULT_LOGIN = "salesfinanceiro";
 
-type AuthConfig = {
-  username: string;
-  passwordHash: string;
+type LoginConfig = {
+  id: string;
+  login: string;
+  senha_hash: string;
+  criado_em: string;
 };
 
-const hashPassword = async (password: string) => {
-  const data = new TextEncoder().encode(password);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-};
+const loadLoginConfig = async (login: string) => {
+  const normalizedLogin = login.trim();
+  const { data, error } = await requireSupabase()
+    .from("app_login")
+    .select("id, login, senha_hash, criado_em")
+    .eq("login", normalizedLogin)
+    .maybeSingle();
 
-const defaultAuth = async (): Promise<AuthConfig> => ({
-  username: USERNAME,
-  passwordHash: await hashPassword(DEFAULT_PASSWORD)
-});
-
-const saveAuthConfigOnline = async (config: AuthConfig) => {
-  console.log("Salvando no Supabase", { table: "app_settings", key: "auth" });
-  const { error } = await requireSupabase()
-    .from("app_settings")
-    .upsert({ key: "auth", value: config, updated_at: new Date().toISOString() });
   if (error) {
-    console.error("Erro completo ao salvar login/senha no Supabase", error);
-    throw error;
-  }
-};
-
-const loadAuthConfigOnline = async () => {
-  const { data, error } = await requireSupabase().from("app_settings").select("value").eq("key", "auth").maybeSingle();
-  if (error) {
-    console.error("Erro completo ao carregar login/senha do Supabase", error);
+    console.error("Erro completo ao carregar login do Supabase", error);
     throw error;
   }
 
-  if (data?.value) {
-    console.log("Dados carregados do Supabase", { table: "app_settings", key: "auth" });
-    return data.value as AuthConfig;
+  if (!data) {
+    console.error("Erro completo ao carregar login do Supabase", { login: normalizedLogin, message: "Login nao encontrado em app_login." });
+    return null;
   }
 
-  const config = await defaultAuth();
-  await saveAuthConfigOnline(config);
-  console.log("Dados carregados do Supabase", { table: "app_settings", key: "auth", seeded: true });
-  return config;
+  console.log("Dados carregados do Supabase", { table: "app_login", login: normalizedLogin });
+  return data as LoginConfig;
 };
 
 export const login = async (username: string, password: string) => {
-  const config = await loadAuthConfigOnline();
-  return username.trim() === config.username && (await hashPassword(password)) === config.passwordHash;
+  const config = await loadLoginConfig(username);
+  if (!config) return false;
+  return bcrypt.compare(password, config.senha_hash);
 };
 
 export const changePassword = async (currentPassword: string, newPassword: string, confirmPassword: string) => {
-  const config = await loadAuthConfigOnline();
-  if ((await hashPassword(currentPassword)) !== config.passwordHash) return { success: false, message: "Senha atual incorreta." };
+  const config = await loadLoginConfig(DEFAULT_LOGIN);
+  if (!config || !(await bcrypt.compare(currentPassword, config.senha_hash))) return { success: false, message: "Senha atual incorreta." };
   if (!newPassword.trim()) return { success: false, message: "Informe uma nova senha." };
   if (newPassword !== confirmPassword) return { success: false, message: "A confirmacao da senha nao confere." };
 
-  await saveAuthConfigOnline({
-    username: USERNAME,
-    passwordHash: await hashPassword(newPassword)
-  });
+  const senha_hash = await bcrypt.hash(newPassword, 10);
+  console.log("Salvando no Supabase", { table: "app_login", login: DEFAULT_LOGIN });
+  const { error } = await requireSupabase()
+    .from("app_login")
+    .update({ senha_hash })
+    .eq("login", DEFAULT_LOGIN);
+
+  if (error) {
+    console.error("Erro completo ao atualizar senha no Supabase", error);
+    throw error;
+  }
 
   return { success: true, message: "Senha alterada com sucesso." };
 };
