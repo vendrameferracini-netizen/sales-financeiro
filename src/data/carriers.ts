@@ -25,12 +25,3 @@ export const defaultCarriers: Carrier[] = [
   { id: "mt", name: "MT", rates: { ml: 10, shopee: 7, avulso: 10 }, active: true },
   { id: "movi", name: "Movi", rates: { ml: 10, shopee: 7, avulso: 10 }, active: true }
 ];
-
-export const blockedLegacyCarrierNames = [
-  "Amanda",
-  "Antonio",
-  "AR4",
-  "Disk Flex",
-  "Flash-TLG",
-  "Flash TLG"
-];

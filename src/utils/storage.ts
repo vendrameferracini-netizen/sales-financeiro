@@ -1,5 +1,5 @@
-import { blockedLegacyCarrierNames, defaultCarriers } from "../data/carriers";
-import { APP_ID, COMPANY_ID } from "../data/app";
+import { defaultCarriers } from "../data/carriers";
+import { APP_ID, COMPANY_ID, COMPANY_NAME } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
 
@@ -112,7 +112,6 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 const salesCompany = { id: COMPANY_ID };
 const normalizeName = (name: string) => name.trim().toLowerCase();
 const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
-const blockedLegacyCarrierNameSet = new Set(blockedLegacyCarrierNames.map(normalizeName));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
@@ -232,8 +231,6 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
-const isBlockedLegacyCarrierRow = (row: DbRow) => blockedLegacyCarrierNameSet.has(normalizeName(text(row, ["name", "nome", "carrier_name"], "")));
-
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
 
 const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
@@ -255,64 +252,24 @@ const getCarrierColumns = async () => {
   return first ? Object.keys(first) : [];
 };
 
-const deletePackageEntriesForCarrierIds = async (carrierIds: string[], operation: string) =>
-  runSupabase(
-    "package_entries",
-    operation,
-    { company_id: COMPANY_ID, carrier_ids: carrierIds },
-    () => requireSupabase().from("package_entries").delete().eq("company_id", COMPANY_ID).in("carrier_id", carrierIds)
+const ensureSalesCompany = async () => {
+  const existing = await runSupabase<DbRow>("companies", "select_sales_company", { id: COMPANY_ID }, () =>
+    requireSupabase().from("companies").select("*").eq("id", COMPANY_ID).maybeSingle()
   );
+  if (existing.data || existing.error) return;
 
-const deletePackageEntriesForCarrierIdsWithoutCompanyFilter = async (carrierIds: string[], operation: string) =>
-  runSupabase(
-    "package_entries",
-    operation,
-    { carrier_ids: carrierIds },
-    () => requireSupabase().from("package_entries").delete().in("carrier_id", carrierIds)
-  );
+  const payload = { id: COMPANY_ID, name: COMPANY_NAME };
+  console.log("Salvando no Supabase", { table: "companies", action: "ensure_sales_company", id: COMPANY_ID });
+  const created = await runSupabase("companies", "insert_sales_company", payload, () => requireSupabase().from("companies").insert(payload));
+  if (!created.error) return;
 
-const deleteCarriersByIds = async (carrierIds: string[], operation: string) =>
-  runSupabase(
-    "carriers",
-    operation,
-    { company_id: COMPANY_ID, ids: carrierIds },
-    () => requireSupabase().from("carriers").delete().eq("company_id", COMPANY_ID).in("id", carrierIds)
-  );
-
-const cleanupLegacyCarriers = async (rows: DbRow[]) => {
-  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && isBlockedLegacyCarrierRow(row));
-  const foreignIds = [...new Set(foreignRows.map((row) => text(row, ["id", "carrier_id"])).filter(Boolean))];
-  if (!foreignIds.length) return;
-
-  console.log("Salvando no Supabase", {
-    table: "carriers",
-    action: "cleanup_sales_scope",
-    company_id: COMPANY_ID,
-    removed: foreignRows.map((row) => text(row, ["name", "nome", "carrier_name"], text(row, ["id"])))
-  });
-
-  await deletePackageEntriesForCarrierIds(foreignIds, "delete_non_sales_carrier_entries");
-
-  let carrierDelete = await deleteCarriersByIds(foreignIds, "delete_non_sales_carriers");
-  if (carrierDelete.error) {
-    await deletePackageEntriesForCarrierIdsWithoutCompanyFilter(foreignIds, "delete_non_sales_carrier_entries_by_carrier_id");
-    carrierDelete = await deleteCarriersByIds(foreignIds, "delete_non_sales_carriers_after_fk_cleanup");
-  }
-  if (!carrierDelete.error) return;
-
-  await runSupabase(
-    "carriers",
-    "deactivate_foreign_sales_carriers",
-    { company_id: COMPANY_ID, ids: foreignIds, active: false },
-    () => requireSupabase().from("carriers").update({ active: false, updated_at: new Date().toISOString() }).eq("company_id", COMPANY_ID).in("id", foreignIds)
-  );
+  await runSupabase("companies", "insert_sales_company_minimal", { id: COMPANY_ID }, () => requireSupabase().from("companies").insert({ id: COMPANY_ID }));
 };
 
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
-  await cleanupLegacyCarriers((data || []) as DbRow[]);
-  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedLegacyCarrierRow(row));
+  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company));
   return sortCarriersByName(rows.map(rowToCarrier));
 };
 
@@ -374,6 +331,7 @@ const auditSupportingTables = async () => {
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
   try {
     const company = salesCompany;
+    await ensureSalesCompany();
     const carriers = await loadCarriers(company);
     const [entries, fixedCosts] = await Promise.all([loadEntries(company), loadFixedCosts(company), auditSupportingTables()]);
 
