@@ -26,4 +26,11 @@ export const defaultCarriers: Carrier[] = [
   { id: "movi", name: "Movi", rates: { ml: 10, shopee: 7, avulso: 10 }, active: true }
 ];
 
-export const salesCarrierNames = defaultCarriers.map((carrier) => carrier.name);
+export const blockedExternalCarrierNames = [
+  "Amanda",
+  "Antonio",
+  "AR4",
+  "Disk Flex",
+  "Flash-TLG",
+  "Flash TLG"
+];

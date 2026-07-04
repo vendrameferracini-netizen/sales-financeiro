@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
-import { deleteCarrier, deleteFixedCost, loadFinanceData, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
+import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
   carriers: Carrier[];
@@ -10,8 +10,8 @@ type FinanceContextValue = {
   error: string;
   getEntry: (date: string) => DailyEntry | undefined;
   saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => void;
-  addCarrier: (carrier: Omit<Carrier, "id">) => void;
-  updateCarrier: (carrier: Carrier) => void;
+  addCarrier: (carrier: Omit<Carrier, "id">) => Promise<void>;
+  updateCarrier: (carrier: Carrier) => Promise<void>;
   removeCarrier: (id: string) => Promise<void>;
   addFixedCost: (cost: Omit<FixedCost, "id">) => void;
   removeFixedCost: (id: string) => void;
@@ -86,25 +86,29 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           });
       },
       addCarrier: (carrier) => {
-        saveCarrier(carrier)
-          .then((savedCarrier) => {
-            setCarriers((current) => sortCarriersByName([...current, savedCarrier]));
+        return saveCarrier(carrier)
+          .then(() => reloadCarriers())
+          .then((freshCarriers) => {
+            setCarriers(sortCarriersByName(freshCarriers));
             setError("");
           })
           .catch((saveError) => {
             console.error("Erro completo ao salvar transportadora no Supabase", saveError);
             setError(errorText(saveError));
+            throw saveError;
           });
       },
       updateCarrier: (carrier) => {
-        saveCarrier(carrier)
-          .then((savedCarrier) => {
-            setCarriers((current) => sortCarriersByName(current.map((item) => (item.id === savedCarrier.id ? savedCarrier : item))));
+        return saveCarrier(carrier)
+          .then(() => reloadCarriers())
+          .then((freshCarriers) => {
+            setCarriers(sortCarriersByName(freshCarriers));
             setError("");
           })
           .catch((saveError) => {
             console.error("Erro completo ao atualizar transportadora no Supabase", saveError);
             setError(errorText(saveError));
+            throw saveError;
           });
       },
       removeCarrier: (id) => {

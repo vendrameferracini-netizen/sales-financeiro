@@ -1,4 +1,4 @@
-import { defaultCarriers, salesCarrierNames } from "../data/carriers";
+import { blockedExternalCarrierNames, defaultCarriers } from "../data/carriers";
 import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
@@ -22,6 +22,18 @@ const getSupabaseErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) return String((error as { message?: unknown }).message);
   return fallback;
+};
+
+const errorTextContent = (error: unknown) => {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) return JSON.stringify(error);
+  return "";
+};
+
+const isMissingColumnError = (error: unknown, column: string) => {
+  const content = errorTextContent(error).toLowerCase();
+  return content.includes(column.toLowerCase()) && (content.includes("column") || content.includes("schema cache") || content.includes("could not find"));
 };
 
 class SupabaseOperationError extends Error {
@@ -86,13 +98,14 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 const salesCompany = { id: COMPANY_ID };
 const normalizeName = (name: string) => name.trim().toLowerCase();
 const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
-const salesCarrierNameSet = new Set(salesCarrierNames.map(normalizeName));
+const blockedExternalCarrierNameSet = new Set(blockedExternalCarrierNames.map(normalizeName));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
-  if (row.company_id !== undefined) return String(row.company_id) === String(company.id);
-  if (row.id_da_empresa !== undefined) return String(row.id_da_empresa) === String(company.id);
-  if (row.app_id !== undefined) return String(row.app_id) === APP_ID;
-  return true;
+  const appValue = row.app_id;
+  const appMatches = appValue === undefined || appValue === null || appValue === "" || String(appValue) === APP_ID;
+  const companyValue = row.company_id !== undefined ? row.company_id : row.id_da_empresa;
+  const companyMatchesValue = companyValue === undefined || String(companyValue) === String(company.id);
+  return appMatches && companyMatchesValue;
 };
 
 const rowCompanyPayload = () => ({
@@ -108,6 +121,11 @@ const carrierToFullRow = (carrier: Carrier) => ({
   avulso: Number(carrier.rates.avulso) || 0,
   active: carrier.active ?? true,
   updated_at: new Date().toISOString()
+});
+
+const carrierToScopedFullRow = (carrier: Carrier) => ({
+  ...carrierToFullRow(carrier),
+  app_id: APP_ID
 });
 
 const carrierToMinimalRow = (carrier: Carrier) => ({
@@ -172,13 +190,12 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
-const isSalesCarrierName = (name: string) => salesCarrierNameSet.has(normalizeName(name));
-const isSalesCarrierRow = (row: DbRow) => isSalesCarrierName(text(row, ["name", "nome", "carrier_name"], ""));
+const isBlockedExternalCarrierRow = (row: DbRow) => blockedExternalCarrierNameSet.has(normalizeName(text(row, ["name", "nome", "carrier_name"], "")));
 
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
 
-const cleanupForeignCarriers = async (rows: DbRow[]) => {
-  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && !isSalesCarrierRow(row));
+const cleanupExternalCarriers = async (rows: DbRow[]) => {
+  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && isBlockedExternalCarrierRow(row));
   const foreignIds = [...new Set(foreignRows.map((row) => text(row, ["id", "carrier_id"])).filter(Boolean))];
   if (!foreignIds.length) return;
 
@@ -234,17 +251,19 @@ const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) =
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
-  await cleanupForeignCarriers((data || []) as DbRow[]);
-  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isSalesCarrierRow(row));
+  await cleanupExternalCarriers((data || []) as DbRow[]);
+  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedExternalCarrierRow(row));
   const carriers = sortCarriersByName(rows.map(rowToCarrier));
   await seedMissingDefaultCarriers(company, carriers);
   if (carriers.length >= defaultCarriers.length) return carriers;
 
   const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if (refreshed.error) return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
-  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isSalesCarrierRow(row)).map(rowToCarrier));
+  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedExternalCarrierRow(row)).map(rowToCarrier));
   return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
 };
+
+export const reloadCarriers = async () => loadCarriers(salesCompany);
 
 const loadEntries = async (company: DbRow) => {
   const [dailyResult, packageResult] = await Promise.all([
@@ -321,19 +340,53 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
 };
 
 export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
+  const carrierId = "id" in carrier && carrier.id ? carrier.id : "";
+  const isUpdate = Boolean(carrierId);
   const completeCarrier: Carrier = {
     ...carrier,
-    id: "id" in carrier && carrier.id ? carrier.id : makeId()
+    id: carrierId || makeId()
   };
 
-  console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id });
+  console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
   const fullPayload = carrierToFullRow(completeCarrier);
-  const result = await runSupabase("carriers", "upsert_full", fullPayload, () => requireSupabase().from("carriers").upsert(fullPayload));
-  if (result.error) {
-    const minimalPayload = carrierToMinimalRow(completeCarrier);
-    await runSupabase("carriers", "upsert_minimal", minimalPayload, () => requireSupabase().from("carriers").upsert(minimalPayload), { throwOnError: true });
+  const scopedPayload = carrierToScopedFullRow(completeCarrier);
+  const operation = isUpdate ? "update" : "insert";
+  let result = isUpdate
+    ? await runSupabase<DbRow>(
+        "carriers",
+        "update",
+        scopedPayload,
+        () => requireSupabase().from("carriers").update(scopedPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle()
+      )
+    : await runSupabase<DbRow>(
+        "carriers",
+        "insert",
+        scopedPayload,
+        () => requireSupabase().from("carriers").insert(scopedPayload).select("*").maybeSingle()
+      );
+
+  if (result.error && isMissingColumnError(result.error, "app_id")) {
+    result = isUpdate
+      ? await runSupabase<DbRow>(
+          "carriers",
+          "update_without_app_id",
+          fullPayload,
+          () => requireSupabase().from("carriers").update(fullPayload).eq("id", completeCarrier.id).eq("company_id", COMPANY_ID).select("*").maybeSingle(),
+          { throwOnError: true }
+        )
+      : await runSupabase<DbRow>(
+          "carriers",
+          "insert_without_app_id",
+          fullPayload,
+          () => requireSupabase().from("carriers").insert(fullPayload).select("*").maybeSingle(),
+          { throwOnError: true }
+        );
+  } else if (result.error) {
+    throw new SupabaseOperationError("carriers", operation, scopedPayload, result.error);
   }
-  return completeCarrier;
+
+  if (!result.data) throw new SupabaseOperationError("carriers", operation, scopedPayload, "Supabase nao retornou a transportadora salva.");
+  return rowToCarrier(result.data);
 };
 
 export const deleteCarrier = async (id: string) => {

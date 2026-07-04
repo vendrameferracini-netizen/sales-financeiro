@@ -84,13 +84,26 @@ export const CarriersPage = () => {
     };
 
     if (form.id) {
-      updateCarrier({ id: form.id, ...carrierPayload });
-      setMessage("Transportadora atualizada com sucesso.");
+      updateCarrier({ id: form.id, ...carrierPayload })
+        .then(() => {
+          reset();
+          setMessage("Transportadora atualizada com sucesso.");
+        })
+        .catch((error) => {
+          console.error({ table: "carriers", operation: "update", payload: { id: form.id, ...carrierPayload }, error });
+          setMessage(error instanceof Error ? error.message : "Erro ao atualizar transportadora no Supabase.");
+        });
     } else {
-      addCarrier(carrierPayload);
-      setMessage("Transportadora cadastrada com sucesso.");
+      addCarrier(carrierPayload)
+        .then(() => {
+          reset();
+          setMessage("Transportadora cadastrada com sucesso.");
+        })
+        .catch((error) => {
+          console.error({ table: "carriers", operation: "insert", payload: carrierPayload, error });
+          setMessage(error instanceof Error ? error.message : "Erro ao cadastrar transportadora no Supabase.");
+        });
     }
-    reset();
   };
 
   return (
