@@ -255,14 +255,43 @@ const ensureSalesCompany = async () => {
   const existing = await runSupabase<DbRow>("companies", "select_sales_company", { id: COMPANY_ID }, () =>
     requireSupabase().from("companies").select("*").eq("id", COMPANY_ID).maybeSingle()
   );
-  if (existing.data || existing.error) return;
+  if (existing.data) return;
 
-  const payload = { id: COMPANY_ID, name: COMPANY_NAME };
   console.log("Salvando no Supabase", { table: "companies", action: "ensure_sales_company", id: COMPANY_ID });
-  const created = await runSupabase("companies", "insert_sales_company", payload, () => requireSupabase().from("companies").insert(payload));
-  if (!created.error) return;
+  const schemaResult = await runSupabase<DbRow[]>("companies", "select_schema_for_sales_company", { id: COMPANY_ID }, () =>
+    requireSupabase().from("companies").select("*").limit(1)
+  );
+  const sampleCompany = (schemaResult.data || [])[0] || {};
+  const schemaPayload: DbRow = { id: COMPANY_ID };
+  if ("name" in sampleCompany) schemaPayload.name = COMPANY_NAME;
+  if ("company_name" in sampleCompany) schemaPayload.company_name = COMPANY_NAME;
+  if ("nome" in sampleCompany) schemaPayload.nome = COMPANY_NAME;
+  if ("status" in sampleCompany && sampleCompany.status !== undefined && sampleCompany.status !== null) schemaPayload.status = sampleCompany.status;
 
-  await runSupabase("companies", "insert_sales_company_minimal", { id: COMPANY_ID }, () => requireSupabase().from("companies").insert({ id: COMPANY_ID }));
+  const attempts = [
+    schemaPayload,
+    { id: COMPANY_ID, name: COMPANY_NAME, status: "active" },
+    { id: COMPANY_ID, name: COMPANY_NAME, status: "ativo" },
+    { id: COMPANY_ID, name: COMPANY_NAME, status: "ATIVO" },
+    { id: COMPANY_ID, name: COMPANY_NAME, status: "ACTIVE" },
+    { id: COMPANY_ID, name: COMPANY_NAME, status: "enabled" },
+    { id: COMPANY_ID, company_name: COMPANY_NAME, status: "active" },
+    { id: COMPANY_ID, nome: COMPANY_NAME, status: "active" },
+    { id: COMPANY_ID, name: COMPANY_NAME },
+    { id: COMPANY_ID, company_name: COMPANY_NAME },
+    { id: COMPANY_ID, nome: COMPANY_NAME },
+    { id: COMPANY_ID }
+  ];
+
+  let lastError: unknown = existing.error;
+  for (const payload of attempts) {
+    const created = await runSupabase("companies", "insert_sales_company", payload, () => requireSupabase().from("companies").insert(payload));
+    if (!created.error) return;
+    lastError = created.error;
+    if (errorTextContent(created.error).toLowerCase().includes("duplicate")) return;
+  }
+
+  throw new SupabaseOperationError("companies", "insert_sales_company", attempts, lastError || "Nao foi possivel criar a empresa Sales Financeiro.");
 };
 
 const loadCarriers = async (company: DbRow) => {
@@ -357,6 +386,7 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
     id: carrierId || makeId()
   };
 
+  await ensureSalesCompany();
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
   const minimalPayload = carrierToMinimalRow(completeCarrier);
   const columns = await getCarrierColumns();
