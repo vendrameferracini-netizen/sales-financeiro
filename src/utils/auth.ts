@@ -4,57 +4,69 @@ import { requireSupabase } from "./supabase";
 
 const DEFAULT_LOGIN = "salesfinanceiro";
 
-type LoginConfig = {
-  id: string;
-  app_id: string;
-  login: string;
-  senha_hash: string;
-  criado_em: string;
+type ProfileRow = Record<string, unknown>;
+
+const text = (row: ProfileRow, keys: string[], fallback = "") => {
+  const value = keys.map((key) => row[key]).find((item) => item !== undefined && item !== null && String(item).trim() !== "");
+  return value === undefined || value === null ? fallback : String(value);
+};
+
+const getLoginValue = (row: ProfileRow) => text(row, ["login", "username", "usuario", "email"]);
+const getPasswordHash = (row: ProfileRow) => text(row, ["senha_hash", "password_hash", "passwordHash", "senha"]);
+
+const profileMatchesApp = (row: ProfileRow) => {
+  if (row.app_id !== undefined) return String(row.app_id) === APP_ID;
+  if (row.company_app_id !== undefined) return String(row.company_app_id) === APP_ID;
+  return true;
 };
 
 const loadLoginConfig = async (login: string) => {
   const loginDigitado = login.trim();
-  console.log("Consultando Supabase", { table: "app_login", app_id: APP_ID, login: loginDigitado, action: "select_login" });
-  const { data, error } = await requireSupabase()
-    .from("app_login")
-    .select("id, login, senha_hash, criado_em, app_id")
-    .eq("app_id", APP_ID)
-    .eq("login", loginDigitado)
-    .maybeSingle();
+  console.log("Consultando Supabase", { table: "profiles", app_id: APP_ID, login: loginDigitado, action: "select_login" });
+
+  const { data, error } = await requireSupabase().from("profiles").select("*");
 
   if (error) {
     console.error("Erro completo ao carregar login do Supabase", error);
     throw error;
   }
 
-  if (!data) {
-    console.error("Erro completo ao carregar login do Supabase", { app_id: APP_ID, login: loginDigitado, message: "Login nao encontrado em app_login." });
+  const profile = ((data || []) as ProfileRow[]).find(
+    (row) => profileMatchesApp(row) && getLoginValue(row).toLowerCase() === loginDigitado.toLowerCase()
+  );
+
+  if (!profile) {
+    console.error("Erro completo ao carregar login do Supabase", { app_id: APP_ID, login: loginDigitado, message: "Login nao encontrado em profiles." });
     return null;
   }
 
-  console.log("Dados carregados do Supabase", { table: "app_login", app_id: APP_ID, login: loginDigitado });
-  return data as LoginConfig;
+  console.log("Dados carregados do Supabase", { table: "profiles", app_id: APP_ID, login: loginDigitado });
+  return profile;
 };
 
 export const login = async (username: string, password: string) => {
   const config = await loadLoginConfig(username);
   if (!config) return false;
-  return bcrypt.compare(password, config.senha_hash);
+  const passwordHash = getPasswordHash(config);
+  if (!passwordHash) return false;
+  return bcrypt.compare(password, passwordHash);
 };
 
 export const changePassword = async (currentPassword: string, newPassword: string, confirmPassword: string) => {
   const config = await loadLoginConfig(DEFAULT_LOGIN);
-  if (!config || !(await bcrypt.compare(currentPassword, config.senha_hash))) return { success: false, message: "Senha atual incorreta." };
+  const currentHash = config ? getPasswordHash(config) : "";
+  if (!config || !currentHash || !(await bcrypt.compare(currentPassword, currentHash))) return { success: false, message: "Senha atual incorreta." };
   if (!newPassword.trim()) return { success: false, message: "Informe uma nova senha." };
   if (newPassword !== confirmPassword) return { success: false, message: "A confirmacao da senha nao confere." };
 
   const senha_hash = await bcrypt.hash(newPassword, 10);
-  console.log("Salvando no Supabase", { table: "app_login", app_id: APP_ID, login: DEFAULT_LOGIN });
+  const passwordColumn = config.senha_hash !== undefined ? "senha_hash" : "password_hash";
+  console.log("Salvando no Supabase", { table: "profiles", app_id: APP_ID, login: DEFAULT_LOGIN, column: passwordColumn });
+
   const { error } = await requireSupabase()
-    .from("app_login")
-    .update({ senha_hash })
-    .eq("app_id", APP_ID)
-    .eq("login", DEFAULT_LOGIN);
+    .from("profiles")
+    .update({ [passwordColumn]: senha_hash })
+    .eq("id", String(config.id));
 
   if (error) {
     console.error("Erro completo ao atualizar senha no Supabase", error);

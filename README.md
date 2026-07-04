@@ -93,12 +93,25 @@ O app usa Supabase para:
 - Transportadoras
 - Lancamentos diarios
 - Custos fixos
-- Configuracoes
-- Login e senha na tabela `app_login`
+- Empresas
+- Pacotes diarios
+- Login e senha na tabela `profiles`
 
 As abas Semanal, Quinzenal, Mensal e Lucro Real calculam seus dados a partir dos registros salvos no Supabase.
 
 O Supabase e obrigatorio. Sem `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`, o app mostra erro visual e nao grava dados localmente.
+
+Tabelas usadas pelo app:
+
+```text
+companies
+carriers
+daily_entries
+package_entries
+fixed_costs
+costs
+profiles
+```
 
 Credenciais iniciais:
 
@@ -107,7 +120,7 @@ Login: salesfinanceiro
 Senha: Sales123
 ```
 
-A senha inicial e as trocas de senha sao armazenadas em `app_login.senha_hash` usando bcrypt. Execute `supabase-schema.sql` ou a migration em `supabase/migrations` para criar a tabela e inserir o login inicial.
+A senha inicial e as trocas de senha sao armazenadas em `profiles.senha_hash` ou `profiles.password_hash` usando bcrypt, conforme a coluna existente no banco.
 
 ## Como transformar em APK Android
 
