@@ -1,4 +1,5 @@
 import { defaultCarriers } from "../data/carriers";
+import { APP_ID } from "../data/app";
 import { Carrier, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
 
@@ -19,6 +20,7 @@ const logError = (message: string, error: unknown) => {
 };
 
 const carrierRow = (carrier: Carrier) => ({
+  app_id: APP_ID,
   id: carrier.id,
   name: carrier.name,
   ml: Number(carrier.rates.ml) || 0,
@@ -29,12 +31,14 @@ const carrierRow = (carrier: Carrier) => ({
 });
 
 const entryRow = (entry: DailyEntry) => ({
+  app_id: APP_ID,
   date: entry.date,
   carriers: entry.carriers || {},
   updated_at: new Date().toISOString()
 });
 
 const fixedCostRow = (cost: FixedCost) => ({
+  app_id: APP_ID,
   id: cost.id,
   description: cost.description,
   category: cost.category,
@@ -45,44 +49,46 @@ const fixedCostRow = (cost: FixedCost) => ({
 });
 
 const upsertCarrierOnline = async (carrier: Carrier) => {
-  console.log("Salvando no Supabase", { table: "carriers", id: carrier.id });
-  const { error } = await requireSupabase().from("carriers").upsert(carrierRow(carrier));
+  console.log("Salvando no Supabase", { table: "carriers", app_id: APP_ID, id: carrier.id });
+  const { error } = await requireSupabase().from("carriers").upsert(carrierRow(carrier), { onConflict: "app_id,id" });
   if (error) logError("Erro ao salvar transportadora no Supabase", error);
 };
 
 const upsertEntryOnline = async (entry: DailyEntry) => {
-  console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date });
-  const { error } = await requireSupabase().from("daily_entries").upsert(entryRow(entry));
+  console.log("Salvando no Supabase", { table: "daily_entries", app_id: APP_ID, date: entry.date });
+  const { error } = await requireSupabase().from("daily_entries").upsert(entryRow(entry), { onConflict: "app_id,date" });
   if (error) logError("Erro ao salvar lancamento diario no Supabase", error);
 };
 
 const upsertFixedCostOnline = async (cost: FixedCost) => {
-  console.log("Salvando no Supabase", { table: "fixed_costs", id: cost.id });
-  const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostRow(cost));
+  console.log("Salvando no Supabase", { table: "fixed_costs", app_id: APP_ID, id: cost.id });
+  const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostRow(cost), { onConflict: "app_id,id" });
   if (error) logError("Erro ao salvar custo fixo no Supabase", error);
 };
 
 export const deleteFixedCost = async (id: string) => {
-  console.log("Salvando no Supabase", { table: "fixed_costs", action: "delete", id });
-  const { error } = await requireSupabase().from("fixed_costs").delete().eq("id", id);
+  console.log("Salvando no Supabase", { table: "fixed_costs", action: "delete", app_id: APP_ID, id });
+  const { error } = await requireSupabase().from("fixed_costs").delete().eq("app_id", APP_ID).eq("id", id);
   if (error) logError("Erro ao remover custo fixo no Supabase", error);
 };
 
-const seedDefaultCarriersIfEmpty = async () => {
-  const { count, error } = await requireSupabase().from("carriers").select("id", { count: "exact", head: true });
+const seedMissingDefaultCarriers = async () => {
+  const { data, error } = await requireSupabase().from("carriers").select("id").eq("app_id", APP_ID);
   if (error) logError("Erro ao verificar transportadoras no Supabase", error);
-  if ((count || 0) > 0) return;
-  await Promise.all(defaultCarriers.map(upsertCarrierOnline));
+  const existingIds = new Set((data || []).map((row) => row.id));
+  const missingCarriers = defaultCarriers.filter((carrier) => !existingIds.has(carrier.id));
+  if (!missingCarriers.length) return;
+  await Promise.all(missingCarriers.map(upsertCarrierOnline));
 };
 
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
   try {
-    await seedDefaultCarriersIfEmpty();
+    await seedMissingDefaultCarriers();
 
     const [carriersResult, entriesResult, costsResult] = await Promise.all([
-      requireSupabase().from("carriers").select("*").order("name", { ascending: true }),
-      requireSupabase().from("daily_entries").select("*"),
-      requireSupabase().from("fixed_costs").select("*").order("month", { ascending: true })
+      requireSupabase().from("carriers").select("*").eq("app_id", APP_ID).order("name", { ascending: true }),
+      requireSupabase().from("daily_entries").select("*").eq("app_id", APP_ID),
+      requireSupabase().from("fixed_costs").select("*").eq("app_id", APP_ID).order("month", { ascending: true })
     ]);
 
     if (carriersResult.error) logError("Erro ao carregar transportadoras do Supabase", carriersResult.error);
@@ -122,6 +128,7 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
     };
 
     console.log("Dados carregados do Supabase", {
+      app_id: APP_ID,
       carriers: snapshot.carriers.length,
       entries: Object.keys(snapshot.entries).length,
       fixedCosts: snapshot.fixedCosts.length

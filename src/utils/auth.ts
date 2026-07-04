@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { APP_ID } from "../data/app";
 import { requireSupabase } from "./supabase";
 
 const DEFAULT_LOGIN = "salesfinanceiro";
@@ -15,6 +16,7 @@ const loadLoginConfig = async (login: string) => {
   const { data, error } = await requireSupabase()
     .from("app_login")
     .select("id, login, senha_hash, criado_em")
+    .eq("app_id", APP_ID)
     .eq("login", normalizedLogin)
     .maybeSingle();
 
@@ -24,11 +26,11 @@ const loadLoginConfig = async (login: string) => {
   }
 
   if (!data) {
-    console.error("Erro completo ao carregar login do Supabase", { login: normalizedLogin, message: "Login nao encontrado em app_login." });
+    console.error("Erro completo ao carregar login do Supabase", { app_id: APP_ID, login: normalizedLogin, message: "Login nao encontrado em app_login." });
     return null;
   }
 
-  console.log("Dados carregados do Supabase", { table: "app_login", login: normalizedLogin });
+  console.log("Dados carregados do Supabase", { table: "app_login", app_id: APP_ID, login: normalizedLogin });
   return data as LoginConfig;
 };
 
@@ -45,10 +47,11 @@ export const changePassword = async (currentPassword: string, newPassword: strin
   if (newPassword !== confirmPassword) return { success: false, message: "A confirmacao da senha nao confere." };
 
   const senha_hash = await bcrypt.hash(newPassword, 10);
-  console.log("Salvando no Supabase", { table: "app_login", login: DEFAULT_LOGIN });
+  console.log("Salvando no Supabase", { table: "app_login", app_id: APP_ID, login: DEFAULT_LOGIN });
   const { error } = await requireSupabase()
     .from("app_login")
     .update({ senha_hash })
+    .eq("app_id", APP_ID)
     .eq("login", DEFAULT_LOGIN);
 
   if (error) {
