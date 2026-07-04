@@ -45,6 +45,11 @@ const isMissingColumnError = (error: unknown, column: string) => {
   return content.includes(column.toLowerCase()) && (content.includes("column") || content.includes("schema cache") || content.includes("could not find"));
 };
 
+const isForeignKeyError = (error: unknown) => {
+  const content = errorTextContent(error).toLowerCase();
+  return content.includes("23503") || content.includes("foreign key") || content.includes("violates foreign key constraint");
+};
+
 class SupabaseOperationError extends Error {
   constructor(
     public table: string,
@@ -175,16 +180,6 @@ const carrierToMinimalRow = (carrier: Carrier) => ({
   name: carrier.name
 });
 
-const carrierToUuidSeedRow = (carrier: Carrier) => ({
-  ...carrierToFullRow(carrier),
-  id: makeId()
-});
-
-const carrierToScopedUuidSeedRow = (carrier: Carrier) => ({
-  ...carrierToScopedFullRow(carrier),
-  id: makeId()
-});
-
 const rowToCarrier = (row: DbRow): Carrier => {
   const name = text(row, ["name", "nome", "carrier_name"], "Sem nome");
   const defaults = defaultCarrierByName.get(normalizeName(name));
@@ -313,48 +308,12 @@ const cleanupLegacyCarriers = async (rows: DbRow[]) => {
   );
 };
 
-const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) => {
-  const existingIds = new Set(carriers.map((carrier) => carrier.id));
-  const existingNames = new Set(carriers.map((carrier) => normalizeName(carrier.name)));
-  const missing = defaultCarriers.filter((carrier) => !existingIds.has(carrier.id) && !existingNames.has(normalizeName(carrier.name)));
-  if (!missing.length) return;
-
-  console.log("Salvando no Supabase", { table: "carriers", action: "seed", count: missing.length });
-  const scopedPayload = missing.map(carrierToScopedFullRow);
-  const scopedResult = await runSupabase("carriers", "seed_scoped_full", scopedPayload, () => requireSupabase().from("carriers").insert(scopedPayload));
-  if (!scopedResult.error) return;
-
-  const fullPayload = missing.map(carrierToFullRow);
-  const fullResult = isMissingColumnError(scopedResult.error, "app_id")
-    ? await runSupabase("carriers", "seed_full", fullPayload, () => requireSupabase().from("carriers").insert(fullPayload))
-    : scopedResult;
-  if (!fullResult.error) return;
-
-  const scopedUuidPayload = missing.map(carrierToScopedUuidSeedRow);
-  const scopedUuidResult = await runSupabase("carriers", "seed_scoped_uuid_full", scopedUuidPayload, () => requireSupabase().from("carriers").insert(scopedUuidPayload));
-  if (!scopedUuidResult.error) return;
-
-  const uuidPayload = missing.map(carrierToUuidSeedRow);
-  const uuidResult = await runSupabase("carriers", "seed_uuid_full", uuidPayload, () => requireSupabase().from("carriers").insert(uuidPayload));
-  if (!uuidResult.error) return;
-
-  const minimalPayload = missing.map(carrierToMinimalRow);
-  await runSupabase("carriers", "seed_minimal", minimalPayload, () => requireSupabase().from("carriers").insert(minimalPayload));
-};
-
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
   await cleanupLegacyCarriers((data || []) as DbRow[]);
   const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedLegacyCarrierRow(row));
-  const carriers = sortCarriersByName(rows.map(rowToCarrier));
-  await seedMissingDefaultCarriers(company, carriers);
-  if (carriers.length >= defaultCarriers.length) return carriers;
-
-  const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
-  if (refreshed.error) return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
-  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedLegacyCarrierRow(row)).map(rowToCarrier));
-  return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
+  return sortCarriersByName(rows.map(rowToCarrier));
 };
 
 export const reloadCarriers = async () => loadCarriers(salesCompany);
@@ -490,9 +449,14 @@ export const deleteCarrier = async (id: string) => {
     "carriers",
     "delete",
     { id, company_id: COMPANY_ID },
-    () => requireSupabase().from("carriers").delete().eq("id", id).eq("company_id", COMPANY_ID),
-    { throwOnError: true }
+    () => requireSupabase().from("carriers").delete().eq("id", id).eq("company_id", COMPANY_ID)
   );
+  if (result.error) {
+    if (isForeignKeyError(result.error)) {
+      throw new Error("Nao foi possivel excluir esta transportadora porque existem lancamentos vinculados. Desative a transportadora para manter o historico.");
+    }
+    throw new SupabaseOperationError("carriers", "delete", { id, company_id: COMPANY_ID }, result.error);
+  }
   return !result.error;
 };
 

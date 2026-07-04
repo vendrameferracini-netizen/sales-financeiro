@@ -64,7 +64,7 @@ export const CarriersPage = () => {
       setMessage("Transportadora excluida com sucesso.");
     } catch (error) {
       console.error({ table: "carriers", operation: "delete", payload: { id: carrier.id }, error });
-      setMessage("Erro ao excluir transportadora. Veja a mensagem Supabase no topo da tela.");
+      setMessage(error instanceof Error ? error.message : "Erro ao excluir transportadora no Supabase.");
     }
   };
 
