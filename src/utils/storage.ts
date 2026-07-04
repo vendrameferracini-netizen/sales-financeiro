@@ -1,4 +1,4 @@
-import { blockedExternalCarrierNames, defaultCarriers } from "../data/carriers";
+import { defaultCarriers, salesCarrierNames } from "../data/carriers";
 import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
@@ -98,7 +98,7 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 const salesCompany = { id: COMPANY_ID };
 const normalizeName = (name: string) => name.trim().toLowerCase();
 const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
-const blockedExternalCarrierNameSet = new Set(blockedExternalCarrierNames.map(normalizeName));
+const salesCarrierNameSet = new Set(salesCarrierNames.map(normalizeName));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
@@ -134,7 +134,12 @@ const carrierToMinimalRow = (carrier: Carrier) => ({
 });
 
 const carrierToUuidSeedRow = (carrier: Carrier) => ({
-  ...carrierToMinimalRow(carrier),
+  ...carrierToFullRow(carrier),
+  id: makeId()
+});
+
+const carrierToScopedUuidSeedRow = (carrier: Carrier) => ({
+  ...carrierToScopedFullRow(carrier),
   id: makeId()
 });
 
@@ -190,12 +195,37 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
-const isBlockedExternalCarrierRow = (row: DbRow) => blockedExternalCarrierNameSet.has(normalizeName(text(row, ["name", "nome", "carrier_name"], "")));
+const isOfficialSalesCarrierName = (name: string) => salesCarrierNameSet.has(normalizeName(name));
+const isOfficialSalesCarrierRow = (row: DbRow) => isOfficialSalesCarrierName(text(row, ["name", "nome", "carrier_name"], ""));
 
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
 
-const cleanupExternalCarriers = async (rows: DbRow[]) => {
-  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && isBlockedExternalCarrierRow(row));
+const deletePackageEntriesForCarrierIds = async (carrierIds: string[], operation: string) =>
+  runSupabase(
+    "package_entries",
+    operation,
+    { company_id: COMPANY_ID, carrier_ids: carrierIds },
+    () => requireSupabase().from("package_entries").delete().eq("company_id", COMPANY_ID).in("carrier_id", carrierIds)
+  );
+
+const deletePackageEntriesForCarrierIdsWithoutCompanyFilter = async (carrierIds: string[], operation: string) =>
+  runSupabase(
+    "package_entries",
+    operation,
+    { carrier_ids: carrierIds },
+    () => requireSupabase().from("package_entries").delete().in("carrier_id", carrierIds)
+  );
+
+const deleteCarriersByIds = async (carrierIds: string[], operation: string) =>
+  runSupabase(
+    "carriers",
+    operation,
+    { company_id: COMPANY_ID, ids: carrierIds },
+    () => requireSupabase().from("carriers").delete().eq("company_id", COMPANY_ID).in("id", carrierIds)
+  );
+
+const cleanupNonSalesCarriers = async (rows: DbRow[]) => {
+  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && !isOfficialSalesCarrierRow(row));
   const foreignIds = [...new Set(foreignRows.map((row) => text(row, ["id", "carrier_id"])).filter(Boolean))];
   if (!foreignIds.length) return;
 
@@ -206,19 +236,13 @@ const cleanupExternalCarriers = async (rows: DbRow[]) => {
     removed: foreignRows.map((row) => text(row, ["name", "nome", "carrier_name"], text(row, ["id"])))
   });
 
-  await runSupabase(
-    "package_entries",
-    "delete_foreign_sales_carrier_entries",
-    { company_id: COMPANY_ID, carrier_ids: foreignIds },
-    () => requireSupabase().from("package_entries").delete().eq("company_id", COMPANY_ID).in("carrier_id", foreignIds)
-  );
+  await deletePackageEntriesForCarrierIds(foreignIds, "delete_non_sales_carrier_entries");
 
-  const carrierDelete = await runSupabase(
-    "carriers",
-    "delete_foreign_sales_carriers",
-    { company_id: COMPANY_ID, ids: foreignIds },
-    () => requireSupabase().from("carriers").delete().eq("company_id", COMPANY_ID).in("id", foreignIds)
-  );
+  let carrierDelete = await deleteCarriersByIds(foreignIds, "delete_non_sales_carriers");
+  if (carrierDelete.error) {
+    await deletePackageEntriesForCarrierIdsWithoutCompanyFilter(foreignIds, "delete_non_sales_carrier_entries_by_carrier_id");
+    carrierDelete = await deleteCarriersByIds(foreignIds, "delete_non_sales_carriers_after_fk_cleanup");
+  }
   if (!carrierDelete.error) return;
 
   await runSupabase(
@@ -236,30 +260,40 @@ const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) =
   if (!missing.length) return;
 
   console.log("Salvando no Supabase", { table: "carriers", action: "seed", count: missing.length });
-  const minimalPayload = missing.map(carrierToMinimalRow);
-  const minimalResult = await runSupabase("carriers", "seed_minimal", minimalPayload, () => requireSupabase().from("carriers").insert(minimalPayload));
-  if (!minimalResult.error) return;
-
-  const uuidPayload = missing.map(carrierToUuidSeedRow);
-  const uuidResult = await runSupabase("carriers", "seed_uuid_minimal", uuidPayload, () => requireSupabase().from("carriers").insert(uuidPayload));
-  if (!uuidResult.error) return;
+  const scopedPayload = missing.map(carrierToScopedFullRow);
+  const scopedResult = await runSupabase("carriers", "seed_scoped_full", scopedPayload, () => requireSupabase().from("carriers").insert(scopedPayload));
+  if (!scopedResult.error) return;
 
   const fullPayload = missing.map(carrierToFullRow);
-  await runSupabase("carriers", "seed_full", fullPayload, () => requireSupabase().from("carriers").insert(fullPayload));
+  const fullResult = isMissingColumnError(scopedResult.error, "app_id")
+    ? await runSupabase("carriers", "seed_full", fullPayload, () => requireSupabase().from("carriers").insert(fullPayload))
+    : scopedResult;
+  if (!fullResult.error) return;
+
+  const scopedUuidPayload = missing.map(carrierToScopedUuidSeedRow);
+  const scopedUuidResult = await runSupabase("carriers", "seed_scoped_uuid_full", scopedUuidPayload, () => requireSupabase().from("carriers").insert(scopedUuidPayload));
+  if (!scopedUuidResult.error) return;
+
+  const uuidPayload = missing.map(carrierToUuidSeedRow);
+  const uuidResult = await runSupabase("carriers", "seed_uuid_full", uuidPayload, () => requireSupabase().from("carriers").insert(uuidPayload));
+  if (!uuidResult.error) return;
+
+  const minimalPayload = missing.map(carrierToMinimalRow);
+  await runSupabase("carriers", "seed_minimal", minimalPayload, () => requireSupabase().from("carriers").insert(minimalPayload));
 };
 
 const loadCarriers = async (company: DbRow) => {
   const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
-  await cleanupExternalCarriers((data || []) as DbRow[]);
-  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedExternalCarrierRow(row));
+  await cleanupNonSalesCarriers((data || []) as DbRow[]);
+  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isOfficialSalesCarrierRow(row));
   const carriers = sortCarriersByName(rows.map(rowToCarrier));
   await seedMissingDefaultCarriers(company, carriers);
   if (carriers.length >= defaultCarriers.length) return carriers;
 
   const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if (refreshed.error) return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
-  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && !isBlockedExternalCarrierRow(row)).map(rowToCarrier));
+  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isOfficialSalesCarrierRow(row)).map(rowToCarrier));
   return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
 };
 
@@ -342,6 +376,15 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
 export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
   const carrierId = "id" in carrier && carrier.id ? carrier.id : "";
   const isUpdate = Boolean(carrierId);
+  if (!isOfficialSalesCarrierName(carrier.name)) {
+    throw new SupabaseOperationError(
+      "carriers",
+      isUpdate ? "update" : "insert",
+      { company_id: COMPANY_ID, app_id: APP_ID, name: carrier.name },
+      `Transportadora "${carrier.name}" nao pertence a lista oficial do Sales.`
+    );
+  }
+
   const completeCarrier: Carrier = {
     ...carrier,
     id: carrierId || makeId()
