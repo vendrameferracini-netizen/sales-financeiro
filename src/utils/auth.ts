@@ -6,18 +6,20 @@ const DEFAULT_LOGIN = "salesfinanceiro";
 
 type LoginConfig = {
   id: string;
+  app_id: string;
   login: string;
   senha_hash: string;
   criado_em: string;
 };
 
 const loadLoginConfig = async (login: string) => {
-  const normalizedLogin = login.trim();
+  const loginDigitado = login.trim();
+  console.log("Consultando Supabase", { table: "app_login", app_id: APP_ID, login: loginDigitado, action: "select_login" });
   const { data, error } = await requireSupabase()
     .from("app_login")
-    .select("id, login, senha_hash, criado_em")
+    .select("id, login, senha_hash, criado_em, app_id")
     .eq("app_id", APP_ID)
-    .eq("login", normalizedLogin)
+    .eq("login", loginDigitado)
     .maybeSingle();
 
   if (error) {
@@ -26,11 +28,11 @@ const loadLoginConfig = async (login: string) => {
   }
 
   if (!data) {
-    console.error("Erro completo ao carregar login do Supabase", { app_id: APP_ID, login: normalizedLogin, message: "Login nao encontrado em app_login." });
+    console.error("Erro completo ao carregar login do Supabase", { app_id: APP_ID, login: loginDigitado, message: "Login nao encontrado em app_login." });
     return null;
   }
 
-  console.log("Dados carregados do Supabase", { table: "app_login", app_id: APP_ID, login: normalizedLogin });
+  console.log("Dados carregados do Supabase", { table: "app_login", app_id: APP_ID, login: loginDigitado });
   return data as LoginConfig;
 };
 
