@@ -1,4 +1,4 @@
-import { defaultCarriers } from "../data/carriers";
+import { defaultCarriers, salesCarrierNames } from "../data/carriers";
 import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
 import { requireSupabase } from "./supabase";
@@ -86,6 +86,7 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 const salesCompany = { id: COMPANY_ID };
 const normalizeName = (name: string) => name.trim().toLowerCase();
 const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
+const salesCarrierNameSet = new Set(salesCarrierNames.map(normalizeName));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   if (row.company_id !== undefined) return String(row.company_id) === String(company.id);
@@ -171,6 +172,46 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
+const isSalesCarrierName = (name: string) => salesCarrierNameSet.has(normalizeName(name));
+const isSalesCarrierRow = (row: DbRow) => isSalesCarrierName(text(row, ["name", "nome", "carrier_name"], ""));
+
+const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID);
+
+const cleanupForeignCarriers = async (rows: DbRow[]) => {
+  const foreignRows = rows.filter((row) => companyMatches(row, salesCompany) && !isSalesCarrierRow(row));
+  const foreignIds = [...new Set(foreignRows.map((row) => text(row, ["id", "carrier_id"])).filter(Boolean))];
+  if (!foreignIds.length) return;
+
+  console.log("Salvando no Supabase", {
+    table: "carriers",
+    action: "cleanup_sales_scope",
+    company_id: COMPANY_ID,
+    removed: foreignRows.map((row) => text(row, ["name", "nome", "carrier_name"], text(row, ["id"])))
+  });
+
+  await runSupabase(
+    "package_entries",
+    "delete_foreign_sales_carrier_entries",
+    { company_id: COMPANY_ID, carrier_ids: foreignIds },
+    () => requireSupabase().from("package_entries").delete().eq("company_id", COMPANY_ID).in("carrier_id", foreignIds)
+  );
+
+  const carrierDelete = await runSupabase(
+    "carriers",
+    "delete_foreign_sales_carriers",
+    { company_id: COMPANY_ID, ids: foreignIds },
+    () => requireSupabase().from("carriers").delete().eq("company_id", COMPANY_ID).in("id", foreignIds)
+  );
+  if (!carrierDelete.error) return;
+
+  await runSupabase(
+    "carriers",
+    "deactivate_foreign_sales_carriers",
+    { company_id: COMPANY_ID, ids: foreignIds, active: false },
+    () => requireSupabase().from("carriers").update({ active: false, updated_at: new Date().toISOString() }).eq("company_id", COMPANY_ID).in("id", foreignIds)
+  );
+};
+
 const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) => {
   const existingIds = new Set(carriers.map((carrier) => carrier.id));
   const existingNames = new Set(carriers.map((carrier) => normalizeName(carrier.name)));
@@ -191,23 +232,24 @@ const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) =
 };
 
 const loadCarriers = async (company: DbRow) => {
-  const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => requireSupabase().from("carriers").select("*"));
+  const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
-  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company));
+  await cleanupForeignCarriers((data || []) as DbRow[]);
+  const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isSalesCarrierRow(row));
   const carriers = sortCarriersByName(rows.map(rowToCarrier));
   await seedMissingDefaultCarriers(company, carriers);
   if (carriers.length >= defaultCarriers.length) return carriers;
 
-  const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => requireSupabase().from("carriers").select("*"));
+  const refreshed = await runSupabase<DbRow[]>("carriers", "select_after_seed", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if (refreshed.error) return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
-  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company)).map(rowToCarrier));
+  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company) && isSalesCarrierRow(row)).map(rowToCarrier));
   return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
 };
 
 const loadEntries = async (company: DbRow) => {
   const [dailyResult, packageResult] = await Promise.all([
-    runSupabase<DbRow[]>("daily_entries", "select", { company_id: COMPANY_ID }, () => requireSupabase().from("daily_entries").select("*")),
-    runSupabase<DbRow[]>("package_entries", "select", { company_id: COMPANY_ID }, () => requireSupabase().from("package_entries").select("*"))
+    runSupabase<DbRow[]>("daily_entries", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("daily_entries")),
+    runSupabase<DbRow[]>("package_entries", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("package_entries"))
   ]);
 
   if (dailyResult.error || packageResult.error) return {};
@@ -234,8 +276,8 @@ const loadEntries = async (company: DbRow) => {
 
 const loadFixedCosts = async (company: DbRow) => {
   const [fixedResult, costsResult] = await Promise.all([
-    runSupabase<DbRow[]>("fixed_costs", "select", { company_id: COMPANY_ID }, () => requireSupabase().from("fixed_costs").select("*")),
-    runSupabase<DbRow[]>("costs", "select", { company_id: COMPANY_ID }, () => requireSupabase().from("costs").select("*"))
+    runSupabase<DbRow[]>("fixed_costs", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("fixed_costs")),
+    runSupabase<DbRow[]>("costs", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("costs"))
   ]);
 
   const rows = [...((fixedResult.data || []) as DbRow[]), ...((costsResult.data || []) as DbRow[])];
@@ -252,15 +294,16 @@ const loadFixedCosts = async (company: DbRow) => {
 
 const auditSupportingTables = async () => {
   await Promise.all([
-    runSupabase<DbRow[]>("companies", "select_audit", { company_id: COMPANY_ID }, () => requireSupabase().from("companies").select("*")),
-    runSupabase<DbRow[]>("profiles", "select_audit", { company_id: COMPANY_ID }, () => requireSupabase().from("profiles").select("*"))
+    runSupabase<DbRow[]>("companies", "select_audit", { id: COMPANY_ID }, () => requireSupabase().from("companies").select("*").eq("id", COMPANY_ID)),
+    runSupabase<DbRow[]>("profiles", "select_audit", { company_id: COMPANY_ID }, () => selectRowsByCompany("profiles"))
   ]);
 };
 
 export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
   try {
     const company = salesCompany;
-    const [carriers, entries, fixedCosts] = await Promise.all([loadCarriers(company), loadEntries(company), loadFixedCosts(company), auditSupportingTables()]);
+    const carriers = await loadCarriers(company);
+    const [entries, fixedCosts] = await Promise.all([loadEntries(company), loadFixedCosts(company), auditSupportingTables()]);
 
     console.log("Dados carregados do Supabase", {
       schema: "companies/carriers/daily_entries/package_entries/fixed_costs/costs",
@@ -315,7 +358,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 
   console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date });
   const existingResult = await runSupabase<DbRow[]>("daily_entries", "select_before_save", { company_id: COMPANY_ID, date: entry.date }, () =>
-    requireSupabase().from("daily_entries").select("*")
+    selectRowsByCompany("daily_entries")
   );
   if (existingResult.error) return;
   const existing = ((existingResult.data || []) as DbRow[]).find((row) => companyMatches(row, company) && text(row, ["date", "data", "entry_date"]) === entry.date);
