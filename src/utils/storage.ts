@@ -11,14 +11,28 @@ type FinanceSnapshot = {
   fixedCosts: FixedCost[];
 };
 
+class SupabaseOperationError extends Error {
+  constructor(
+    public table: string,
+    public operation: string,
+    public details: unknown
+  ) {
+    super(`Erro Supabase em ${table}.${operation}`);
+  }
+}
+
 export const sortCarriersByName = (carriers: Carrier[] = []) =>
   [...(carriers || [])].sort((first, second) => first.name.localeCompare(second.name, "pt-BR", { sensitivity: "base" }));
 
 const makeId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
-const logError = (message: string, error: unknown) => {
-  console.error(message, error);
-  throw error;
+const logError = (table: string, operation: string, error: unknown) => {
+  console.error("Erro completo do Supabase", { table, operation, error });
+  throw new SupabaseOperationError(table, operation, error);
+};
+
+const logWarning = (table: string, operation: string, error: unknown) => {
+  console.error("Erro completo do Supabase", { table, operation, error });
 };
 
 const text = (row: DbRow, keys: string[], fallback = "") => {
@@ -40,6 +54,8 @@ const bool = (row: DbRow, keys: string[], fallback = true) => {
 };
 
 const salesCompany = { id: COMPANY_ID };
+const normalizeName = (name: string) => name.trim().toLowerCase();
+const defaultCarrierByName = new Map(defaultCarriers.map((carrier) => [normalizeName(carrier.name), carrier]));
 
 const companyMatches = (row: DbRow, company: DbRow) => {
   if (row.company_id !== undefined) return String(row.company_id) === String(company.id);
@@ -52,7 +68,7 @@ const rowCompanyPayload = () => ({
   company_id: COMPANY_ID
 });
 
-const carrierToRow = (carrier: Carrier) => ({
+const carrierToFullRow = (carrier: Carrier) => ({
   ...rowCompanyPayload(),
   id: carrier.id,
   name: carrier.name,
@@ -63,16 +79,30 @@ const carrierToRow = (carrier: Carrier) => ({
   updated_at: new Date().toISOString()
 });
 
-const rowToCarrier = (row: DbRow): Carrier => ({
-  id: text(row, ["id"], makeId()),
-  name: text(row, ["name", "nome", "carrier_name", "transportadora"], "Sem nome"),
-  rates: {
-    ml: num(row, ["ml", "valor_ml", "mercado_livre", "value_ml", "rate_ml"]),
-    shopee: num(row, ["shopee", "valor_shopee", "value_shopee", "rate_shopee"]),
-    avulso: num(row, ["avulso", "valor_avulso", "value_avulso", "rate_avulso"])
-  },
-  active: bool(row, ["active", "ativo", "status"], true)
+const carrierToMinimalRow = (carrier: Carrier) => ({
+  company_id: COMPANY_ID,
+  name: carrier.name
 });
+
+const carrierToUuidSeedRow = (carrier: Carrier) => ({
+  ...carrierToMinimalRow(carrier),
+  id: makeId()
+});
+
+const rowToCarrier = (row: DbRow): Carrier => {
+  const name = text(row, ["name", "nome", "carrier_name"], "Sem nome");
+  const defaults = defaultCarrierByName.get(normalizeName(name));
+  return {
+    id: text(row, ["id", "carrier_id"], defaults?.id || makeId()),
+    name,
+    rates: {
+      ml: num(row, ["ml", "valor_ml", "mercado_livre", "value_ml", "rate_ml", "ml_rate", "price_ml"], defaults?.rates.ml || 0),
+      shopee: num(row, ["shopee", "valor_shopee", "value_shopee", "rate_shopee", "shopee_rate", "price_shopee"], defaults?.rates.shopee || 0),
+      avulso: num(row, ["avulso", "valor_avulso", "value_avulso", "rate_avulso", "avulso_rate", "price_avulso"], defaults?.rates.avulso || 0)
+    },
+    active: bool(row, ["active", "ativo", "status"], true)
+  };
+};
 
 const fixedCostToRow = (cost: FixedCost) => ({
   ...rowCompanyPayload(),
@@ -113,25 +143,39 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
 
 const seedMissingDefaultCarriers = async (company: DbRow, carriers: Carrier[]) => {
   const existingIds = new Set(carriers.map((carrier) => carrier.id));
-  const missing = defaultCarriers.filter((carrier) => !existingIds.has(carrier.id));
+  const existingNames = new Set(carriers.map((carrier) => normalizeName(carrier.name)));
+  const missing = defaultCarriers.filter((carrier) => !existingIds.has(carrier.id) && !existingNames.has(normalizeName(carrier.name)));
   if (!missing.length) return;
 
   console.log("Salvando no Supabase", { table: "carriers", action: "seed", count: missing.length });
-  const { error } = await requireSupabase().from("carriers").insert(missing.map((carrier) => carrierToRow(carrier)));
-  if (error) logError("Erro ao criar transportadoras iniciais no Supabase", error);
+  const minimalResult = await requireSupabase().from("carriers").insert(missing.map(carrierToMinimalRow));
+  if (!minimalResult.error) return;
+
+  logWarning("carriers", "seed_minimal", minimalResult.error);
+  const uuidResult = await requireSupabase().from("carriers").insert(missing.map(carrierToUuidSeedRow));
+  if (!uuidResult.error) return;
+
+  logWarning("carriers", "seed_uuid_minimal", uuidResult.error);
+  const fullResult = await requireSupabase().from("carriers").insert(missing.map(carrierToFullRow));
+  if (fullResult.error) logWarning("carriers", "seed_full", fullResult.error);
 };
 
 const loadCarriers = async (company: DbRow) => {
   const { data, error } = await requireSupabase().from("carriers").select("*");
-  if (error) logError("Erro ao carregar transportadoras do Supabase", error);
+  if (error) logError("carriers", "select", error);
+  if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
   const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company));
   const carriers = sortCarriersByName(rows.map(rowToCarrier));
   await seedMissingDefaultCarriers(company, carriers);
   if (carriers.length >= defaultCarriers.length) return carriers;
 
   const refreshed = await requireSupabase().from("carriers").select("*");
-  if (refreshed.error) logError("Erro ao recarregar transportadoras do Supabase", refreshed.error);
-  return sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company)).map(rowToCarrier));
+  if (refreshed.error) {
+    logWarning("carriers", "select_after_seed", refreshed.error);
+    return carriers.length ? carriers : sortCarriersByName(defaultCarriers);
+  }
+  const refreshedCarriers = sortCarriersByName(((refreshed.data || []) as DbRow[]).filter((row) => companyMatches(row, company)).map(rowToCarrier));
+  return refreshedCarriers.length ? refreshedCarriers : sortCarriersByName(defaultCarriers);
 };
 
 const loadEntries = async (company: DbRow) => {
@@ -140,8 +184,14 @@ const loadEntries = async (company: DbRow) => {
     requireSupabase().from("package_entries").select("*")
   ]);
 
-  if (dailyResult.error) logError("Erro ao carregar lancamentos diarios do Supabase", dailyResult.error);
-  if (packageResult.error) logError("Erro ao carregar pacotes diarios do Supabase", packageResult.error);
+  if (dailyResult.error) {
+    logWarning("daily_entries", "select", dailyResult.error);
+    return {};
+  }
+  if (packageResult.error) {
+    logWarning("package_entries", "select", packageResult.error);
+    return {};
+  }
 
   const dailyRows = ((dailyResult.data || []) as DbRow[]).filter((row) => companyMatches(row, company));
   const packageRows = ((packageResult.data || []) as DbRow[]).filter((row) => companyMatches(row, company));
@@ -169,8 +219,8 @@ const loadFixedCosts = async (company: DbRow) => {
     requireSupabase().from("costs").select("*")
   ]);
 
-  if (fixedResult.error) logError("Erro ao carregar custos fixos do Supabase", fixedResult.error);
-  if (costsResult.error) logError("Erro ao carregar custos do Supabase", costsResult.error);
+  if (fixedResult.error) logWarning("fixed_costs", "select", fixedResult.error);
+  if (costsResult.error) logWarning("costs", "select", costsResult.error);
 
   const rows = [...((fixedResult.data || []) as DbRow[]), ...((costsResult.data || []) as DbRow[])];
   const seen = new Set<string>();
@@ -211,8 +261,12 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
   };
 
   console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id });
-  const { error } = await requireSupabase().from("carriers").upsert(carrierToRow(completeCarrier));
-  if (error) logError("Erro ao salvar transportadora no Supabase", error);
+  const result = await requireSupabase().from("carriers").upsert(carrierToFullRow(completeCarrier));
+  if (result.error) {
+    logWarning("carriers", "upsert_full", result.error);
+    const minimalResult = await requireSupabase().from("carriers").upsert(carrierToMinimalRow(completeCarrier));
+    if (minimalResult.error) logError("carriers", "upsert_minimal", minimalResult.error);
+  }
   return completeCarrier;
 };
 
@@ -226,19 +280,19 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 
   console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date });
   const existingResult = await requireSupabase().from("daily_entries").select("*");
-  if (existingResult.error) logError("Erro ao verificar lancamento diario no Supabase", existingResult.error);
+  if (existingResult.error) logError("daily_entries", "select_before_save", existingResult.error);
   const existing = ((existingResult.data || []) as DbRow[]).find((row) => companyMatches(row, company) && text(row, ["date", "data", "entry_date"]) === entry.date);
 
   const dailyResult = existing?.id
     ? await requireSupabase().from("daily_entries").update(dailyPayload).eq("id", text(existing, ["id"])).select("*").maybeSingle()
     : await requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle();
 
-  if (dailyResult.error) logError("Erro ao salvar lancamento diario no Supabase", dailyResult.error);
+  if (dailyResult.error) logError("daily_entries", existing?.id ? "update" : "insert", dailyResult.error);
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
 
   const deleteResult = await requireSupabase().from("package_entries").delete().eq("daily_entry_id", dailyId);
-  if (deleteResult.error) logError("Erro ao limpar pacotes antigos no Supabase", deleteResult.error);
+  if (deleteResult.error) logError("package_entries", "delete_by_daily_entry_id", deleteResult.error);
 
   const rows = Object.entries(entry.carriers || {})
     .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
@@ -246,7 +300,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 
   if (!rows.length) return;
   const insertResult = await requireSupabase().from("package_entries").insert(rows);
-  if (insertResult.error) logError("Erro ao salvar pacotes diarios no Supabase", insertResult.error);
+  if (insertResult.error) logError("package_entries", "insert", insertResult.error);
 };
 
 export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => {
@@ -257,12 +311,12 @@ export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => 
 
   console.log("Salvando no Supabase", { table: "fixed_costs", id: completeCost.id });
   const { error } = await requireSupabase().from("fixed_costs").upsert(fixedCostToRow(completeCost));
-  if (error) logError("Erro ao salvar custo fixo no Supabase", error);
+  if (error) logError("fixed_costs", "upsert", error);
   return completeCost;
 };
 
 export const deleteFixedCost = async (id: string) => {
   console.log("Salvando no Supabase", { table: "fixed_costs", action: "delete", id });
   const { error } = await requireSupabase().from("fixed_costs").delete().eq("id", id);
-  if (error) logError("Erro ao remover custo fixo no Supabase", error);
+  if (error) logError("fixed_costs", "delete", error);
 };

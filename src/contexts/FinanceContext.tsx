@@ -18,7 +18,11 @@ type FinanceContextValue = {
 
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : "Erro ao comunicar com o Supabase.");
+const errorText = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) return String((error as { message?: unknown }).message);
+  return "Erro ao comunicar com o Supabase. Veja o console para tabela, operacao e erro completo.";
+};
 
 export const FinanceProvider = ({ children }: { children: ReactNode }) => {
   const [carriers, setCarriers] = useState<Carrier[]>([]);
