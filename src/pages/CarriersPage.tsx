@@ -1,4 +1,4 @@
-import { Edit3, Plus, Save, X } from "lucide-react";
+import { Edit3, Plus, Save, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { ResponsiveTable } from "../components/ResponsiveTable";
@@ -34,7 +34,7 @@ const carrierToForm = (carrier: Carrier): CarrierForm => ({
 });
 
 export const CarriersPage = () => {
-  const { carriers, addCarrier, updateCarrier } = useFinance();
+  const { carriers, addCarrier, updateCarrier, removeCarrier } = useFinance();
   const [form, setForm] = useState<CarrierForm>(blankForm);
   const [message, setMessage] = useState("");
   const formPanelRef = useRef<HTMLElement | null>(null);
@@ -53,6 +53,19 @@ export const CarriersPage = () => {
     setForm(carrierToForm(carrier));
     setMessage("");
     requestAnimationFrame(() => formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
+  const handleDelete = async (carrier: Carrier) => {
+    if (!window.confirm("Tem certeza que deseja excluir esta transportadora?")) return;
+    setMessage("");
+    try {
+      await removeCarrier(carrier.id);
+      if (form.id === carrier.id) reset();
+      setMessage("Transportadora excluida com sucesso.");
+    } catch (error) {
+      console.error({ table: "carriers", operation: "delete", payload: { id: carrier.id }, error });
+      setMessage("Erro ao excluir transportadora. Veja a mensagem Supabase no topo da tela.");
+    }
   };
 
   const submit = (event: FormEvent) => {
@@ -146,10 +159,16 @@ export const CarriersPage = () => {
           currency(carrier.rates.shopee),
           currency(carrier.rates.avulso),
           carrier.active ? "Ativa" : "Inativa",
-          <button className="secondary-button compact" type="button" onClick={() => handleEdit(carrier)}>
-            <Edit3 size={18} />
-            Editar
-          </button>
+          <div className="table-actions">
+            <button className="secondary-button compact" type="button" onClick={() => handleEdit(carrier)}>
+              <Edit3 size={18} />
+              Editar
+            </button>
+            <button className="secondary-button compact danger" type="button" onClick={() => handleDelete(carrier)}>
+              <Trash2 size={18} />
+              Excluir
+            </button>
+          </div>
         ])}
       />
     </>

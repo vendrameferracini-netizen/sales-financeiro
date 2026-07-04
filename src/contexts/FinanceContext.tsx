@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
-import { deleteFixedCost, loadFinanceData, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
+import { deleteCarrier, deleteFixedCost, loadFinanceData, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
   carriers: Carrier[];
@@ -12,6 +12,7 @@ type FinanceContextValue = {
   saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => void;
   addCarrier: (carrier: Omit<Carrier, "id">) => void;
   updateCarrier: (carrier: Carrier) => void;
+  removeCarrier: (id: string) => Promise<void>;
   addFixedCost: (cost: Omit<FixedCost, "id">) => void;
   removeFixedCost: (id: string) => void;
 };
@@ -104,6 +105,18 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           .catch((saveError) => {
             console.error("Erro completo ao atualizar transportadora no Supabase", saveError);
             setError(errorText(saveError));
+          });
+      },
+      removeCarrier: (id) => {
+        return deleteCarrier(id)
+          .then(() => {
+            setCarriers((current) => sortCarriersByName(current.filter((carrier) => carrier.id !== id)));
+            setError("");
+          })
+          .catch((deleteError) => {
+            console.error({ table: "carriers", operation: "delete", payload: { id }, error: deleteError });
+            setError(errorText(deleteError));
+            throw deleteError;
           });
       },
       addFixedCost: (cost) => {

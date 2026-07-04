@@ -293,6 +293,18 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
   return completeCarrier;
 };
 
+export const deleteCarrier = async (id: string) => {
+  console.log("Salvando no Supabase", { table: "carriers", action: "delete", id, company_id: COMPANY_ID });
+  const result = await runSupabase(
+    "carriers",
+    "delete",
+    { id, company_id: COMPANY_ID },
+    () => requireSupabase().from("carriers").delete().eq("id", id).eq("company_id", COMPANY_ID),
+    { throwOnError: true }
+  );
+  return !result.error;
+};
+
 export const saveDailyEntry = async (entry: DailyEntry) => {
   const company = salesCompany;
   const dailyPayload = {

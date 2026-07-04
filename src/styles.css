@@ -312,6 +312,18 @@ select {
   color: #050505;
 }
 
+.secondary-button.danger {
+  border-color: #d0101b;
+  color: #d0101b;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -792,6 +804,10 @@ tfoot td {
 
   tfoot td::before {
     color: rgba(255, 255, 255, 0.82);
+  }
+
+  .table-actions {
+    justify-content: flex-end;
   }
 
   .bar-chart {
