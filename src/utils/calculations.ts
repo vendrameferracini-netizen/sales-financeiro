@@ -22,6 +22,46 @@ export const getPartnerRevenue = (input = blankCarrierInput()) =>
 
 export const getPackageTotal = (input = blankCarrierInput()) => safeInt(input.ml) + safeInt(input.shopee) + safeInt(input.avulso);
 
+export const buildDailyFullValueReport = (carrierInputs: Record<string, DailyEntry["carriers"][string]> = {}, carriers: Carrier[] = []) => {
+  const rows = carriers
+    .map((carrier) => {
+      const input = normalizeCarrierInput(carrierInputs[carrier.id]);
+      const totalPackages = getPackageTotal(input);
+      const valueMl = input.ml * carrier.rates.ml;
+      const valueShopee = input.shopee * carrier.rates.shopee;
+      const valueAvulso = input.avulso * carrier.rates.avulso;
+      return {
+        carrierId: carrier.id,
+        carrierName: carrier.name,
+        ml: input.ml,
+        shopee: input.shopee,
+        avulso: input.avulso,
+        totalPackages,
+        valueMl,
+        valueShopee,
+        valueAvulso,
+        totalValue: valueMl + valueShopee + valueAvulso
+      };
+    })
+    .filter((row) => row.totalPackages > 0);
+
+  const totals = rows.reduce(
+    (acc, row) => ({
+      ml: acc.ml + row.ml,
+      shopee: acc.shopee + row.shopee,
+      avulso: acc.avulso + row.avulso,
+      totalPackages: acc.totalPackages + row.totalPackages,
+      valueMl: acc.valueMl + row.valueMl,
+      valueShopee: acc.valueShopee + row.valueShopee,
+      valueAvulso: acc.valueAvulso + row.valueAvulso,
+      totalValue: acc.totalValue + row.totalValue
+    }),
+    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, valueMl: 0, valueShopee: 0, valueAvulso: 0, totalValue: 0 }
+  );
+
+  return { rows, totals };
+};
+
 export const buildPeriodSummary = (
   entries: Record<string, DailyEntry>,
   carriers: Carrier[],

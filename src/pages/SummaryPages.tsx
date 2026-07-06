@@ -6,7 +6,7 @@ import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
 import { useFinance } from "../contexts/FinanceContext";
 import { monthKey, getFortnightRange, getMonthRange, getWeekRange, monthLabel, todayISO } from "../utils/dates";
-import { buildDailyEvolution, buildPeriodSummary } from "../utils/calculations";
+import { buildDailyEvolution, buildDailyFullValueReport, buildPeriodSummary } from "../utils/calculations";
 import { currency } from "../utils/format";
 import { buildCarrierTransportReport, CarrierReportFormat, CarrierReportType } from "../utils/carrierReport";
 import { exportGeneralExcel, exportSelectedCarrierExcel } from "../utils/excel";
@@ -248,20 +248,43 @@ export const FortnightlyPage = () => {
 export const MonthlyPage = () => {
   const { carriers, entries } = useFinance();
   const [month, setMonth] = useState(monthKey(todayISO()));
+  const [dashboardDate, setDashboardDate] = useState(todayISO());
   const range = useMemo(() => getMonthRange(month), [month]);
   const summary = useMemo(() => buildPeriodSummary(entries, carriers, range.start, range.end, range.label), [carriers, entries, range]);
   const evolution = useMemo(() => buildDailyEvolution(entries, carriers, range.start, range.end), [carriers, entries, range]);
+  const dailyReport = useMemo(() => buildDailyFullValueReport(entries[dashboardDate]?.carriers || {}, carriers), [carriers, dashboardDate, entries]);
   return (
     <>
       <PageHeader
         title="Dashboard Mensal"
-        subtitle={monthLabel(month)}
+        subtitle={`${monthLabel(month)} | Dia ${dashboardDate.split("-").reverse().join("/")}`}
         actions={
           <>
             <input type="month" value={month} onChange={(event) => setMonth(event.target.value || monthKey(todayISO()))} />
+            <input
+              type="date"
+              value={dashboardDate}
+              onChange={(event) => {
+                const nextDate = event.target.value || todayISO();
+                setDashboardDate(nextDate);
+                setMonth(monthKey(nextDate));
+              }}
+            />
             <PdfActions summary={summary} type="Mensal" />
           </>
         }
+      />
+      <SummaryCards
+        cards={[
+          { label: "ML do dia", value: String(dailyReport.totals.ml) },
+          { label: "Shopee do dia", value: String(dailyReport.totals.shopee) },
+          { label: "Avulso do dia", value: String(dailyReport.totals.avulso) },
+          { label: "Pacotes do dia", value: String(dailyReport.totals.totalPackages), tone: "dark" },
+          { label: "Valor ML do dia", value: currency(dailyReport.totals.valueMl) },
+          { label: "Valor Shopee do dia", value: currency(dailyReport.totals.valueShopee) },
+          { label: "Valor Avulso do dia", value: currency(dailyReport.totals.valueAvulso) },
+          { label: "Valor total do dia", value: currency(dailyReport.totals.totalValue), tone: "red" }
+        ]}
       />
       <SummaryCards
         cards={[

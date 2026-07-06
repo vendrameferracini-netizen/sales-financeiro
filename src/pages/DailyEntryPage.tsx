@@ -1,11 +1,12 @@
 import { ChevronLeft, ChevronRight, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
 import { useFinance } from "../contexts/FinanceContext";
 import { Carrier, DailyCarrierInput } from "../types";
 import { addDays, formatDate, todayISO } from "../utils/dates";
-import { blankCarrierInput, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
+import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
 import { currency } from "../utils/format";
 
 const buildBlankDraft = (carriers: Carrier[]) =>
@@ -31,19 +32,10 @@ export const DailyEntryPage = () => {
     setSaved(false);
   }, [activeCarriers, date, getEntry]);
 
-  const totals = useMemo(
-    () =>
-      activeCarriers.reduce(
-        (acc, carrier) => {
-          const input = normalizeCarrierInput(draft[carrier.id]);
-          acc.packages += getPackageTotal(input);
-          acc.value += getCarrierDailyValue(carriers, carrier.id, input);
-          return acc;
-        },
-        { packages: 0, value: 0 }
-      ),
-    [activeCarriers, carriers, draft]
-  );
+  const dailyReport = useMemo(() => {
+    const savedInputs = getEntry(date)?.carriers || {};
+    return buildDailyFullValueReport({ ...savedInputs, ...draft }, carriers);
+  }, [carriers, date, draft, getEntry]);
 
   const updateField = (carrierId: string, field: keyof DailyCarrierInput, value: string) => {
     const parsed = Math.max(0, Number.parseInt(value || "0", 10) || 0);
@@ -79,8 +71,27 @@ export const DailyEntryPage = () => {
       <SummaryCards
         cards={[
           { label: "Data", value: formatDate(date) },
-          { label: "Total de pacotes", value: String(totals.packages), tone: "dark" },
-          { label: "Valor diario", value: currency(totals.value), tone: "red" }
+          { label: "ML do dia", value: String(dailyReport.totals.ml) },
+          { label: "Shopee do dia", value: String(dailyReport.totals.shopee) },
+          { label: "Avulso do dia", value: String(dailyReport.totals.avulso) },
+          { label: "Total de pacotes", value: String(dailyReport.totals.totalPackages), tone: "dark" },
+          { label: "Valor ML", value: currency(dailyReport.totals.valueMl) },
+          { label: "Valor Shopee", value: currency(dailyReport.totals.valueShopee) },
+          { label: "Valor Avulso", value: currency(dailyReport.totals.valueAvulso) },
+          { label: "Valor total", value: currency(dailyReport.totals.totalValue), tone: "red" }
+        ]}
+      />
+
+      <ResponsiveTable
+        columns={["Transportadora", "ML", "Shopee", "Avulso", "Total de pacotes", "Valor total"]}
+        rows={dailyReport.rows.map((row) => [row.carrierName, row.ml, row.shopee, row.avulso, row.totalPackages, currency(row.totalValue)])}
+        footer={[
+          "Totais",
+          dailyReport.totals.ml,
+          dailyReport.totals.shopee,
+          dailyReport.totals.avulso,
+          dailyReport.totals.totalPackages,
+          currency(dailyReport.totals.totalValue)
         ]}
       />
 
