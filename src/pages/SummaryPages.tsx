@@ -1,5 +1,5 @@
 import { Download, FileDown, FileSpreadsheet } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChannelChart, EvolutionChart } from "../components/Charts";
 import { PageHeader } from "../components/PageHeader";
 import { ResponsiveTable } from "../components/ResponsiveTable";
@@ -8,8 +8,9 @@ import { useFinance } from "../contexts/FinanceContext";
 import { monthKey, getFortnightRange, getMonthRange, getWeekRange, monthLabel, todayISO } from "../utils/dates";
 import { buildDailyEvolution, buildPeriodSummary } from "../utils/calculations";
 import { currency } from "../utils/format";
-import { exportGeneralExcel } from "../utils/excel";
-import { exportCarrierPdfs, exportGeneralPdf } from "../utils/pdf";
+import { buildCarrierTransportReport, CarrierReportFormat, CarrierReportType } from "../utils/carrierReport";
+import { exportGeneralExcel, exportSelectedCarrierExcel } from "../utils/excel";
+import { exportGeneralPdf, exportSelectedCarrierPdf } from "../utils/pdf";
 
 const summaryRows = (summary: ReturnType<typeof buildPeriodSummary>) =>
   summary.rows
@@ -48,16 +49,131 @@ const PdfActions = ({ summary, type }: { summary: ReturnType<typeof buildPeriodS
       <Download size={18} />
       Exportar PDF Geral
     </button>
-    <button className="secondary-button" onClick={() => exportCarrierPdfs(summary, type)}>
-      <FileDown size={18} />
-      Exportar PDF por Transportadora
-    </button>
     <button className="secondary-button" onClick={() => exportGeneralExcel(summary, type)}>
       <FileSpreadsheet size={18} />
       Exportar Excel
     </button>
   </>
 );
+
+const CarrierExportPanel = ({
+  entries,
+  carriers,
+  range
+}: {
+  entries: ReturnType<typeof useFinance>["entries"];
+  carriers: ReturnType<typeof useFinance>["carriers"];
+  range: { start: string; end: string; label: string };
+}) => {
+  const [periodMode, setPeriodMode] = useState<"current" | "custom">("current");
+  const [start, setStart] = useState(range.start);
+  const [end, setEnd] = useState(range.end);
+  const [carrierId, setCarrierId] = useState("");
+  const [reportType, setReportType] = useState<CarrierReportType>("summary");
+  const [format, setFormat] = useState<CarrierReportFormat>("pdf");
+
+  useEffect(() => {
+    if (periodMode === "current") {
+      setStart(range.start);
+      setEnd(range.end);
+    }
+  }, [periodMode, range.end, range.start]);
+
+  const exportReport = () => {
+    if (!carrierId) {
+      alert("Selecione uma transportadora para exportar.");
+      return;
+    }
+    if (start > end) {
+      alert("A data inicial nao pode ser maior que a data final.");
+      return;
+    }
+
+    const carrier = carriers.find((item) => item.id === carrierId);
+    if (!carrier) {
+      alert("Transportadora nao encontrada.");
+      return;
+    }
+
+    const report = buildCarrierTransportReport(entries, carrier, start, end);
+    if (report.totals.totalPackages <= 0) {
+      alert("Nenhum lancamento encontrado para esta transportadora no periodo.");
+      return;
+    }
+
+    if (format === "pdf") exportSelectedCarrierPdf(report, reportType);
+    else exportSelectedCarrierExcel(report, reportType);
+  };
+
+  return (
+    <section className="carrier-export-panel">
+      <div>
+        <span className="eyebrow">Fechamento por transportadora</span>
+        <h2>Exportacao para envio</h2>
+      </div>
+      <div className="carrier-export-grid">
+        <label>
+          Periodo
+          <select value={periodMode} onChange={(event) => setPeriodMode(event.target.value as "current" | "custom")}>
+            <option value="current">Periodo atual da aba</option>
+            <option value="custom">Personalizado</option>
+          </select>
+        </label>
+        <label>
+          Data inicial
+          <input
+            type="date"
+            value={start}
+            onChange={(event) => {
+              setPeriodMode("custom");
+              setStart(event.target.value || range.start);
+            }}
+          />
+        </label>
+        <label>
+          Data final
+          <input
+            type="date"
+            value={end}
+            onChange={(event) => {
+              setPeriodMode("custom");
+              setEnd(event.target.value || range.end);
+            }}
+          />
+        </label>
+        <label>
+          Transportadora
+          <select value={carrierId} onChange={(event) => setCarrierId(event.target.value)}>
+            <option value="">Selecione</option>
+            {carriers.map((carrier) => (
+              <option key={carrier.id} value={carrier.id}>
+                {carrier.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Tipo de relatorio
+          <select value={reportType} onChange={(event) => setReportType(event.target.value as CarrierReportType)}>
+            <option value="summary">Resumido</option>
+            <option value="daily">Detalhado por dia</option>
+          </select>
+        </label>
+        <label>
+          Formato
+          <select value={format} onChange={(event) => setFormat(event.target.value as CarrierReportFormat)}>
+            <option value="pdf">PDF</option>
+            <option value="excel">Excel</option>
+          </select>
+        </label>
+      </div>
+      <button className="primary-button carrier-export-button" type="button" onClick={exportReport}>
+        <FileDown size={18} />
+        Exportar transportadora
+      </button>
+    </section>
+  );
+};
 
 export const WeeklyPage = () => {
   const { carriers, entries } = useFinance();
@@ -84,6 +200,7 @@ export const WeeklyPage = () => {
           { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" }
         ]}
       />
+      <CarrierExportPanel entries={entries} carriers={carriers} range={range} />
       <SummaryTable summary={summary} />
     </>
   );
@@ -122,6 +239,7 @@ export const FortnightlyPage = () => {
           { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" }
         ]}
       />
+      <CarrierExportPanel entries={entries} carriers={carriers} range={range} />
       <SummaryTable summary={summary} />
     </>
   );
@@ -157,6 +275,7 @@ export const MonthlyPage = () => {
         <EvolutionChart data={evolution} />
         <ChannelChart summary={summary} />
       </div>
+      <CarrierExportPanel entries={entries} carriers={carriers} range={range} />
       <SummaryTable summary={summary} />
     </>
   );

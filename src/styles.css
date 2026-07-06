@@ -514,6 +514,34 @@ tfoot td {
   margin-bottom: 20px;
 }
 
+.carrier-export-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 20px;
+  border: 1px solid #e1e1e1;
+  border-top: 4px solid #d0101b;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.carrier-export-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.carrier-export-grid select,
+.carrier-export-grid input,
+.carrier-export-button {
+  width: 100%;
+}
+
+.carrier-export-button {
+  justify-self: start;
+  width: auto;
+}
+
 .chart-panel {
   padding: 18px;
 }
@@ -638,6 +666,7 @@ tfoot td {
   }
 
   .chart-grid,
+  .carrier-export-grid,
   .cost-form,
   .carrier-form {
     grid-template-columns: 1fr;
@@ -735,6 +764,10 @@ tfoot td {
 
   .input-grid {
     grid-template-columns: 1fr;
+  }
+
+  .carrier-export-button {
+    width: 100%;
   }
 
   .save-bar {

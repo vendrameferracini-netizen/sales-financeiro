@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import { PeriodSummary } from "../types";
+import { CarrierReportType, CarrierTransportReport, carrierReportFileName } from "./carrierReport";
 import { formatDate } from "./dates";
 import { currency } from "./format";
 
@@ -100,18 +101,88 @@ export const exportCarrierPdfs = (summary: PeriodSummary, reportType: string) =>
       ["Avulso", String(row.avulso)],
       ["Valor Avulso", currency(row.rates.avulso)],
       ["Total de pacotes", String(row.totalPackages)],
-      ["Receita total", currency(row.totalRevenue)],
-      ["Receita parceria", currency(row.partnerRevenue)],
-      ["Diferença", currency(row.difference)],
-      ["Data de emissão", new Date().toLocaleString("pt-BR")]
+      ["Valor total cheio", currency(row.totalRevenue)],
+      ["Data de emissao", new Date().toLocaleString("pt-BR")]
     ];
     items.forEach(([label, value], index) => {
-      const y = 48 + index * 12;
+      const rowY = 48 + index * 12;
       doc.setFont("helvetica", "bold");
-      doc.text(label, 18, y);
+      doc.text(label, 18, rowY);
       doc.setFont("helvetica", "normal");
-      doc.text(value, 82, y);
+      doc.text(value, 82, rowY);
     });
     doc.save(`financeiro-salles-${reportType.toLowerCase()}-${row.carrierName.replace(/\W+/g, "-").toLowerCase()}.pdf`);
   });
+};
+
+export const exportSelectedCarrierPdf = (report: CarrierTransportReport, reportType: CarrierReportType) => {
+  if (report.totals.totalPackages <= 0) {
+    alert("Nenhum dado encontrado para exportar.");
+    return;
+  }
+
+  const doc = new jsPDF();
+  addHeader(doc, `Fechamento - ${report.carrier.name}`, report.periodLabel);
+  doc.setTextColor(20, 20, 20);
+  doc.setFontSize(10);
+
+  if (reportType === "summary") {
+    const items = [
+      ["Transportadora", report.carrier.name],
+      ["Periodo", report.periodLabel],
+      ["Total Mercado Livre", String(report.totals.ml)],
+      ["Total Shopee", String(report.totals.shopee)],
+      ["Total Avulso", String(report.totals.avulso)],
+      ["Total de pacotes", String(report.totals.totalPackages)],
+      ["Valor unitario ML", currency(report.carrier.rates.ml)],
+      ["Valor unitario Shopee", currency(report.carrier.rates.shopee)],
+      ["Valor unitario Avulso", currency(report.carrier.rates.avulso)],
+      ["Valor total cheio", currency(report.totals.totalRevenue)]
+    ];
+
+    items.forEach(([label, value], index) => {
+      const rowY = 46 + index * 12;
+      doc.setFont("helvetica", "bold");
+      doc.text(label, 18, rowY);
+      doc.setFont("helvetica", "normal");
+      doc.text(value, 88, rowY);
+    });
+  } else {
+    let y = 42;
+    doc.setFont("helvetica", "bold");
+    addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor"]);
+    doc.setFont("helvetica", "normal");
+
+    report.days.forEach((row, index) => {
+      y += 8;
+      if (y > 276) {
+        doc.addPage();
+        addHeader(doc, `Fechamento - ${report.carrier.name}`, report.periodLabel);
+        y = 42;
+        doc.setFont("helvetica", "bold");
+        addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor"]);
+        doc.setFont("helvetica", "normal");
+        y += 8;
+      }
+      addRow(
+        doc,
+        y,
+        [formatDate(row.date), String(row.ml), String(row.shopee), String(row.avulso), String(row.totalPackages), currency(row.totalRevenue)],
+        index % 2 === 0
+      );
+    });
+
+    y += 12;
+    doc.setFont("helvetica", "bold");
+    addRow(doc, y, [
+      "Totais",
+      String(report.totals.ml),
+      String(report.totals.shopee),
+      String(report.totals.avulso),
+      String(report.totals.totalPackages),
+      currency(report.totals.totalRevenue)
+    ]);
+  }
+
+  doc.save(carrierReportFileName(report, "pdf"));
 };
