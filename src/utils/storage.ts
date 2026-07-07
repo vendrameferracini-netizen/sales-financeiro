@@ -113,7 +113,7 @@ const salesCompany = { id: COMPANY_ID };
 const companyMatches = (row: DbRow, company: DbRow) => {
   const appValue = row.app_id;
   const hasAppColumn = Object.prototype.hasOwnProperty.call(row, "app_id");
-  const appMatches = !hasAppColumn || String(appValue || "") === APP_ID;
+  const appMatches = hasAppColumn && String(appValue || "") === APP_ID;
   const companyValue = row.company_id !== undefined ? row.company_id : row.id_da_empresa;
   const companyMatchesValue = companyValue === undefined || String(companyValue) === String(company.id);
   return appMatches && companyMatchesValue;
@@ -234,21 +234,22 @@ const carrierPayloadForColumns = (carrier: Carrier, columns: string[]) => {
   const payload = filterPayloadByColumns(allCarrierColumnPayload(carrier), columns);
   delete payload.ativo;
   if (!("name" in payload) && !("nome" in payload) && !("carrier_name" in payload)) payload.name = carrier.name;
+  if (!("app_id" in payload)) payload.app_id = APP_ID;
   if (!("company_id" in payload) && !("id_da_empresa" in payload)) payload.company_id = COMPANY_ID;
   if (columns.length === 0 && !("id" in payload)) payload.id = carrier.id;
   return payload;
 };
 
 const getCarrierColumns = async () => {
-  const result = await runSupabase<DbRow[]>("carriers", "select_schema_for_save", { company_id: COMPANY_ID }, () =>
-    requireSupabase().from("carriers").select("*").limit(1)
+  const result = await runSupabase<DbRow[]>("carriers", "select_schema_for_save", { app_id: APP_ID, company_id: COMPANY_ID }, () =>
+    selectRowsByCompany("carriers").limit(1)
   );
   const first = (result.data || [])[0];
   return first ? Object.keys(first) : [];
 };
 
 const loadCarriers = async (company: DbRow) => {
-  const { data } = await runSupabase<DbRow[]>("carriers", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
+  const { data } = await runSupabase<DbRow[]>("carriers", "select", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("carriers"));
   if ((data || [])[0]) console.log("Dados carregados do Supabase", { table: "carriers", operation: "schema_detected", columns: Object.keys((data || [])[0] as DbRow) });
   const rows = ((data || []) as DbRow[]).filter((row) => companyMatches(row, company));
   return sortCarriersByName(rows.map(rowToCarrier));
@@ -258,8 +259,8 @@ export const reloadCarriers = async () => loadCarriers(salesCompany);
 
 const loadEntries = async (company: DbRow) => {
   const [dailyResult, packageResult] = await Promise.all([
-    runSupabase<DbRow[]>("daily_entries", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("daily_entries")),
-    runSupabase<DbRow[]>("package_entries", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("package_entries"))
+    runSupabase<DbRow[]>("daily_entries", "select", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("daily_entries")),
+    runSupabase<DbRow[]>("package_entries", "select", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("package_entries"))
   ]);
 
   if (dailyResult.error || packageResult.error) return {};
@@ -286,8 +287,8 @@ const loadEntries = async (company: DbRow) => {
 
 const loadFixedCosts = async (company: DbRow) => {
   const [fixedResult, costsResult] = await Promise.all([
-    runSupabase<DbRow[]>("fixed_costs", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("fixed_costs")),
-    runSupabase<DbRow[]>("costs", "select", { company_id: COMPANY_ID }, () => selectRowsByCompany("costs"))
+    runSupabase<DbRow[]>("fixed_costs", "select", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("fixed_costs")),
+    runSupabase<DbRow[]>("costs", "select", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("costs"))
   ]);
 
   const rows = [...((fixedResult.data || []) as DbRow[]), ...((costsResult.data || []) as DbRow[])];
@@ -305,7 +306,7 @@ const loadFixedCosts = async (company: DbRow) => {
 const auditSupportingTables = async () => {
   await Promise.all([
     runSupabase<DbRow[]>("companies", "select_audit", { id: COMPANY_ID }, () => requireSupabase().from("companies").select("*").eq("id", COMPANY_ID)),
-    runSupabase<DbRow[]>("profiles", "select_audit", { company_id: COMPANY_ID }, () => selectRowsByCompany("profiles"))
+    runSupabase<DbRow[]>("profiles", "select_audit", { app_id: APP_ID, company_id: COMPANY_ID }, () => selectRowsByCompany("profiles"))
   ]);
 };
 
@@ -318,6 +319,7 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
     console.log("Dados carregados do Supabase", {
       schema: "companies/carriers/daily_entries/package_entries/fixed_costs/costs",
       company_id: COMPANY_ID,
+      app_id: APP_ID,
       carriers: carriers.length,
       entries: Object.keys(entries).length,
       fixedCosts: fixedCosts.length
@@ -338,7 +340,7 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
     id: carrierId || makeId()
   };
 
-  console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, company_id: COMPANY_ID });
+  console.log("Salvando no Supabase", { table: "carriers", id: completeCarrier.id, app_id: APP_ID, company_id: COMPANY_ID });
   const columns = await getCarrierColumns();
   const schemaPayload = carrierPayloadForColumns(completeCarrier, columns);
   console.log("Payload enviado ao Supabase", { table: "carriers", operation: isUpdate ? "update" : "insert", payload: schemaPayload });
@@ -365,44 +367,7 @@ export const saveCarrier = async (carrier: Omit<Carrier, "id"> | Carrier) => {
         () => requireSupabase().from("carriers").insert(schemaPayload).select("*").maybeSingle()
       );
 
-  if (
-    result.error &&
-    (isMissingColumnError(result.error, "app_id") ||
-      isMissingColumnError(result.error, "updated_at") ||
-      isMissingColumnError(result.error, "active") ||
-      isMissingColumnError(result.error, "status"))
-  ) {
-    const fallbackPayload = { ...schemaPayload };
-    if (isMissingColumnError(result.error, "app_id")) delete fallbackPayload.app_id;
-    if (isMissingColumnError(result.error, "updated_at")) delete fallbackPayload.updated_at;
-    if (isMissingColumnError(result.error, "status")) delete fallbackPayload.status;
-    if (isMissingColumnError(result.error, "active")) {
-      delete fallbackPayload.active;
-    }
-    result = isUpdate
-      ? await runSupabase<DbRow>(
-          "carriers",
-          "update_without_app_id",
-          fallbackPayload,
-          () =>
-            requireSupabase()
-              .from("carriers")
-              .update(fallbackPayload)
-              .eq("id", completeCarrier.id)
-              .eq("company_id", COMPANY_ID)
-              .eq("app_id", APP_ID)
-              .select("*")
-              .maybeSingle(),
-          { throwOnError: true }
-        )
-      : await runSupabase<DbRow>(
-          "carriers",
-          "insert_without_app_id",
-          fallbackPayload,
-          () => requireSupabase().from("carriers").insert(fallbackPayload).select("*").maybeSingle(),
-          { throwOnError: true }
-        );
-  } else if (result.error) {
+  if (result.error) {
     throw new SupabaseOperationError("carriers", operation, schemaPayload, result.error);
   }
 
@@ -435,8 +400,8 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
     updated_at: new Date().toISOString()
   };
 
-  console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date });
-  const existingResult = await runSupabase<DbRow[]>("daily_entries", "select_before_save", { company_id: COMPANY_ID, date: entry.date }, () =>
+  console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date, app_id: APP_ID, company_id: COMPANY_ID });
+  const existingResult = await runSupabase<DbRow[]>("daily_entries", "select_before_save", { app_id: APP_ID, company_id: COMPANY_ID, date: entry.date }, () =>
     selectRowsByCompany("daily_entries")
   );
   if (existingResult.error) return;
@@ -444,7 +409,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
 
   const dailyResult = existing?.id
     ? await runSupabase<DbRow>("daily_entries", "update", { id: text(existing, ["id"]), ...dailyPayload }, () =>
-        requireSupabase().from("daily_entries").update(dailyPayload).eq("id", text(existing, ["id"])).select("*").maybeSingle()
+        requireSupabase().from("daily_entries").update(dailyPayload).eq("id", text(existing, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID).select("*").maybeSingle()
       )
     : await runSupabase<DbRow>("daily_entries", "insert", { id: "generated", ...dailyPayload }, () =>
         requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle()
@@ -454,8 +419,8 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
 
-  const deleteResult = await runSupabase("package_entries", "delete_by_daily_entry_id", { daily_entry_id: dailyId }, () =>
-    requireSupabase().from("package_entries").delete().eq("daily_entry_id", dailyId)
+  const deleteResult = await runSupabase("package_entries", "delete_by_daily_entry_id", { daily_entry_id: dailyId, app_id: APP_ID, company_id: COMPANY_ID }, () =>
+    requireSupabase().from("package_entries").delete().eq("daily_entry_id", dailyId).eq("company_id", COMPANY_ID).eq("app_id", APP_ID)
   );
   if (deleteResult.error) return;
 
