@@ -22,6 +22,19 @@ export const getPartnerRevenue = (input = blankCarrierInput()) =>
 
 export const getPackageTotal = (input = blankCarrierInput()) => safeInt(input.ml) + safeInt(input.shopee) + safeInt(input.avulso);
 
+const LOG_MANAGER_CARRIER_NAMES = new Set(["JA", "M10", "MG", "ANJUN"]);
+
+const normalizeCarrierNameForRule = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
+
+export const isLogManagerCarrier = (carrierName: string) => LOG_MANAGER_CARRIER_NAMES.has(normalizeCarrierNameForRule(carrierName));
+
+export const getLogManagerValue = (carrierName: string, packages: number) => (isLogManagerCarrier(carrierName) ? packages * LOG_MANAGER_PACKAGE_RATE : 0);
+
 export const buildDailyFullValueReport = (carrierInputs: Record<string, DailyEntry["carriers"][string]> = {}, carriers: Carrier[] = []) => {
   const rows = carriers
     .map((carrier) => {
@@ -30,6 +43,7 @@ export const buildDailyFullValueReport = (carrierInputs: Record<string, DailyEnt
       const valueMl = input.ml * carrier.rates.ml;
       const valueShopee = input.shopee * carrier.rates.shopee;
       const valueAvulso = input.avulso * carrier.rates.avulso;
+      const logManager = getLogManagerValue(carrier.name, totalPackages);
       return {
         carrierId: carrier.id,
         carrierName: carrier.name,
@@ -40,7 +54,8 @@ export const buildDailyFullValueReport = (carrierInputs: Record<string, DailyEnt
         valueMl,
         valueShopee,
         valueAvulso,
-        totalValue: valueMl + valueShopee + valueAvulso
+        totalValue: valueMl + valueShopee + valueAvulso,
+        logManager
       };
     })
     .filter((row) => row.totalPackages > 0);
@@ -54,9 +69,10 @@ export const buildDailyFullValueReport = (carrierInputs: Record<string, DailyEnt
       valueMl: acc.valueMl + row.valueMl,
       valueShopee: acc.valueShopee + row.valueShopee,
       valueAvulso: acc.valueAvulso + row.valueAvulso,
-      totalValue: acc.totalValue + row.totalValue
+      totalValue: acc.totalValue + row.totalValue,
+      logManager: acc.logManager + row.logManager
     }),
-    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, valueMl: 0, valueShopee: 0, valueAvulso: 0, totalValue: 0 }
+    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, valueMl: 0, valueShopee: 0, valueAvulso: 0, totalValue: 0, logManager: 0 }
   );
 
   return { rows, totals };
@@ -83,6 +99,7 @@ export const buildPeriodSummary = (
       { ml: 0, shopee: 0, avulso: 0, totalRevenue: 0, partnerRevenue: 0 }
     );
     const totalPackages = sums.ml + sums.shopee + sums.avulso;
+    const logManager = getLogManagerValue(carrier.name, totalPackages);
     return {
       carrierId: carrier.id,
       carrierName: carrier.name,
@@ -93,7 +110,8 @@ export const buildPeriodSummary = (
       totalPackages,
       totalRevenue: sums.totalRevenue,
       partnerRevenue: sums.partnerRevenue,
-      difference: sums.totalRevenue - sums.partnerRevenue
+      difference: sums.totalRevenue - sums.partnerRevenue,
+      logManager
     };
   });
 
@@ -105,9 +123,10 @@ export const buildPeriodSummary = (
       totalPackages: acc.totalPackages + row.totalPackages,
       totalRevenue: acc.totalRevenue + row.totalRevenue,
       partnerRevenue: acc.partnerRevenue + row.partnerRevenue,
-      difference: acc.difference + row.difference
+      difference: acc.difference + row.difference,
+      logManager: acc.logManager + row.logManager
     }),
-    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalRevenue: 0, partnerRevenue: 0, difference: 0 }
+    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalRevenue: 0, partnerRevenue: 0, difference: 0, logManager: 0 }
   );
 
   return { label, start, end, rows, totals };
@@ -127,10 +146,14 @@ export const getCostSummary = (
 ): CostSummary => {
   const filtered = (fixedCosts || []).filter((cost) => cost.month === month && (!fortnight || cost.fortnight === fortnight));
   const fixedTotal = filtered.reduce((sum, cost) => sum + (Number.isFinite(cost.amount) ? cost.amount : 0), 0);
-  const logManager = period.totals.totalPackages * LOG_MANAGER_PACKAGE_RATE;
+  const logManagerByCarrier = period.rows
+    .filter((row) => row.logManager > 0)
+    .map((row) => ({ carrierId: row.carrierId, carrierName: row.carrierName, packages: row.totalPackages, value: row.logManager }));
+  const logManager = logManagerByCarrier.reduce((sum, row) => sum + row.value, 0);
   return {
     fixedCosts: fixedTotal,
     logManager,
+    logManagerByCarrier,
     total: fixedTotal + logManager,
     packages: period.totals.totalPackages
   };

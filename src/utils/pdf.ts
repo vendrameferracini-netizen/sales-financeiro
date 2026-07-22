@@ -24,7 +24,7 @@ const addRow = (doc: jsPDF, y: number, cols: string[], fill = false) => {
     doc.setFillColor(245, 245, 245);
     doc.rect(10, y - 5, 190, 8, "F");
   }
-  const xs = [12, 48, 66, 86, 108, 134, 166, 190];
+  const xs = [12, 45, 62, 79, 96, 120, 145, 170, 196];
   cols.forEach((col, index) => doc.text(col, xs[index], y, { align: index >= 1 ? "right" : "left" }));
 };
 
@@ -39,7 +39,7 @@ export const exportGeneralPdf = (summary: PeriodSummary, reportType: string) => 
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   let y = 40;
-  addRow(doc, y, ["Transportadora", "ML", "Shopee", "Avulso", "Total", "Receita", "Parceria", "Dif."]);
+  addRow(doc, y, ["Transportadora", "ML", "Shopee", "Avulso", "Total", "Receita", "Parceria", "Dif.", "LogM."]);
   doc.setFont("helvetica", "normal");
   summary.rows
     .filter((row) => row.totalPackages > 0)
@@ -61,7 +61,8 @@ export const exportGeneralPdf = (summary: PeriodSummary, reportType: string) => 
           String(row.totalPackages),
           currency(row.totalRevenue),
           currency(row.partnerRevenue),
-          currency(row.difference)
+          currency(row.difference),
+          currency(row.logManager)
         ],
         index % 2 === 0
       );
@@ -76,7 +77,8 @@ export const exportGeneralPdf = (summary: PeriodSummary, reportType: string) => 
     String(summary.totals.totalPackages),
     currency(summary.totals.totalRevenue),
     currency(summary.totals.partnerRevenue),
-    currency(summary.totals.difference)
+    currency(summary.totals.difference),
+    currency(summary.totals.logManager)
   ]);
   doc.save(`financeiro-salles-${reportType.toLowerCase()}-geral.pdf`);
 };
@@ -137,7 +139,8 @@ export const exportSelectedCarrierPdf = (report: CarrierTransportReport, reportT
       ["Valor unitario ML", currency(report.carrier.rates.ml)],
       ["Valor unitario Shopee", currency(report.carrier.rates.shopee)],
       ["Valor unitario Avulso", currency(report.carrier.rates.avulso)],
-      ["Valor total cheio", currency(report.totals.totalRevenue)]
+      ["Valor total cheio", currency(report.totals.totalRevenue)],
+      ["LogManager", currency(report.totals.logManager)]
     ];
 
     items.forEach(([label, value], index) => {
@@ -150,7 +153,7 @@ export const exportSelectedCarrierPdf = (report: CarrierTransportReport, reportT
   } else {
     let y = 42;
     doc.setFont("helvetica", "bold");
-    addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor"]);
+    addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor", "LogM."]);
     doc.setFont("helvetica", "normal");
 
     report.days.forEach((row, index) => {
@@ -160,14 +163,14 @@ export const exportSelectedCarrierPdf = (report: CarrierTransportReport, reportT
         addHeader(doc, `Fechamento - ${report.carrier.name}`, report.periodLabel);
         y = 42;
         doc.setFont("helvetica", "bold");
-        addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor"]);
+        addRow(doc, y, ["Data", "ML", "Shopee", "Avulso", "Total", "Valor", "LogM."]);
         doc.setFont("helvetica", "normal");
         y += 8;
       }
       addRow(
         doc,
         y,
-        [formatDate(row.date), String(row.ml), String(row.shopee), String(row.avulso), String(row.totalPackages), currency(row.totalRevenue)],
+        [formatDate(row.date), String(row.ml), String(row.shopee), String(row.avulso), String(row.totalPackages), currency(row.totalRevenue), currency(row.logManager)],
         index % 2 === 0
       );
     });
@@ -180,7 +183,8 @@ export const exportSelectedCarrierPdf = (report: CarrierTransportReport, reportT
       String(report.totals.shopee),
       String(report.totals.avulso),
       String(report.totals.totalPackages),
-      currency(report.totals.totalRevenue)
+      currency(report.totals.totalRevenue),
+      currency(report.totals.logManager)
     ]);
   }
 

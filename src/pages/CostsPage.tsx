@@ -54,10 +54,19 @@ export const CostsPage = () => {
       <SummaryCards
         cards={[
           { label: "Custos fixos", value: currency(costs.fixedCosts) },
-          { label: "LogManager", value: currency(costs.logManager), tone: "red" },
+          { label: "LogManager automatico", value: currency(costs.logManager), tone: "red" },
           { label: "Custo total da quinzena", value: currency(costs.total), tone: "dark" }
         ]}
       />
+
+      <section className="form-panel">
+        <h2>LogManager automatico</h2>
+        <ResponsiveTable
+          columns={["Transportadora", "Pacotes", "Valor por pacote", "Total LogManager"]}
+          rows={costs.logManagerByCarrier.map((row) => [row.carrierName, row.packages, currency(0.25), currency(row.value)])}
+          footer={["Total", costs.logManagerByCarrier.reduce((sum, row) => sum + row.packages, 0), currency(0.25), currency(costs.logManager)]}
+        />
+      </section>
 
       <section className="form-panel">
         <h2>Adicionar custo</h2>

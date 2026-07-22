@@ -87,6 +87,7 @@ export const exportDashboardPdf = (report: DashboardReport) => {
   doc.text(`Avulso: ${report.totals.avulso}`, 110, 50);
   doc.text(`Pacotes: ${report.totals.totalPackages}`, 150, 50);
   doc.text(`Valor total recebido: ${currency(report.totals.totalValue)}`, 14, 60);
+  doc.text(`LogManager automatico: ${currency(report.totals.logManager)}`, 110, 60);
 
   drawDashboardChart(doc, report, 82);
 
@@ -96,8 +97,9 @@ export const exportDashboardPdf = (report: DashboardReport) => {
   doc.text("ML", 68, y, { align: "right" });
   doc.text("Shopee", 96, y, { align: "right" });
   doc.text("Avulso", 126, y, { align: "right" });
-  doc.text("Total", 160, y, { align: "right" });
-  doc.text("Valor", 196, y, { align: "right" });
+  doc.text("Total", 150, y, { align: "right" });
+  doc.text("Valor", 178, y, { align: "right" });
+  doc.text("LogM.", 196, y, { align: "right" });
   doc.setFont("helvetica", "normal");
 
   report.rows.forEach((row, index) => {
@@ -114,8 +116,9 @@ export const exportDashboardPdf = (report: DashboardReport) => {
     doc.text(String(row.ml), 68, y, { align: "right" });
     doc.text(String(row.shopee), 96, y, { align: "right" });
     doc.text(String(row.avulso), 126, y, { align: "right" });
-    doc.text(String(row.totalPackages), 160, y, { align: "right" });
-    doc.text(currency(row.totalValue), 196, y, { align: "right" });
+    doc.text(String(row.totalPackages), 150, y, { align: "right" });
+    doc.text(currency(row.totalValue), 178, y, { align: "right" });
+    doc.text(currency(row.logManager), 196, y, { align: "right" });
   });
 
   doc.save(dashboardReportFileName(report, "pdf"));
@@ -138,6 +141,7 @@ export const exportDashboardExcel = (report: DashboardReport) => {
     ["Avulso", report.totals.avulso],
     ["Total Geral de Pacotes", report.totals.totalPackages],
     ["Valor Total Recebido", money(report.totals.totalValue)],
+    ["LogManager Automatico", money(report.totals.logManager)],
     [],
     ["Grafico - dados por canal"],
     ["Data", "Mercado Livre", "Shopee", "Avulso"],
@@ -148,13 +152,13 @@ export const exportDashboardExcel = (report: DashboardReport) => {
     ...report.rows.map((row) => [formatDate(row.date), bar(row.ml), bar(row.shopee), bar(row.avulso)]),
     [],
     ["Tabela resumida"],
-    ["Data", "Mercado Livre", "Shopee", "Avulso", "Total de Pacotes", "Valor Total Recebido"],
-    ...report.rows.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages, money(row.totalValue)]),
-    ["TOTAL", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages, money(report.totals.totalValue)]
+    ["Data", "Mercado Livre", "Shopee", "Avulso", "Total de Pacotes", "Valor Total Recebido", "LogManager"],
+    ...report.rows.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages, money(row.totalValue), money(row.logManager)]),
+    ["TOTAL", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages, money(report.totals.totalValue), money(report.totals.logManager)]
   ];
 
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 22 }];
+  sheet["!cols"] = [{ wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 22 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(workbook, sheet, "Dashboard");
   XLSX.writeFile(workbook, dashboardReportFileName(report, "xlsx"));
 };

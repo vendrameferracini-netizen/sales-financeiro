@@ -47,7 +47,7 @@ export const RealProfitPage = () => {
           { label: "Receita parceria", value: currency(summary.totals.partnerRevenue) },
           { label: "Diferenca / Lucro bruto", value: currency(summary.totals.difference), tone: "dark" },
           { label: "Custos fixos", value: currency(costs.fixedCosts) },
-          { label: "Custo LogManager", value: currency(costs.logManager) },
+          { label: "Custo LogManager automatico", value: currency(costs.logManager) },
           { label: "Total de custos", value: currency(costs.total), tone: "dark" },
           { label: "Lucro real final", value: currency(realProfit), tone: "red" }
         ]}

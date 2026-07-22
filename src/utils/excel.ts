@@ -53,7 +53,8 @@ export const exportGeneralExcel = (summary: PeriodSummary, reportType: string) =
       "Total Pacotes",
       "Receita Total",
       "Receita Parceria",
-      "Diferenca"
+      "Diferenca",
+      "LogManager"
     ],
     ...rows.map((row) => [
       row.carrierName,
@@ -66,7 +67,8 @@ export const exportGeneralExcel = (summary: PeriodSummary, reportType: string) =
       row.totalPackages,
       money(row.totalRevenue),
       money(row.partnerRevenue),
-      money(row.difference)
+      money(row.difference),
+      money(row.logManager)
     ]),
     [],
     [
@@ -80,7 +82,8 @@ export const exportGeneralExcel = (summary: PeriodSummary, reportType: string) =
       summary.totals.totalPackages,
       money(summary.totals.totalRevenue),
       money(summary.totals.partnerRevenue),
-      money(summary.totals.difference)
+      money(summary.totals.difference),
+      money(summary.totals.logManager)
     ]
   ];
 
@@ -96,6 +99,7 @@ export const exportGeneralExcel = (summary: PeriodSummary, reportType: string) =
     { wch: 14 },
     { wch: 16 },
     { wch: 18 },
+    { wch: 14 },
     { wch: 14 }
   ];
   const usedSheetNames = new Set(["Geral"]);
@@ -149,7 +153,8 @@ export const exportSelectedCarrierExcel = (report: CarrierTransportReport, repor
           ["Valor unitario ML", money(report.carrier.rates.ml)],
           ["Valor unitario Shopee", money(report.carrier.rates.shopee)],
           ["Valor unitario Avulso", money(report.carrier.rates.avulso)],
-          ["Valor total cheio", money(report.totals.totalRevenue)]
+          ["Valor total cheio", money(report.totals.totalRevenue)],
+          ["LogManager", money(report.totals.logManager)]
         ]
       : [
           ["FINANCEIRO SALLES"],
@@ -157,14 +162,14 @@ export const exportSelectedCarrierExcel = (report: CarrierTransportReport, repor
           [`Periodo: ${report.periodLabel}`],
           [`Emissao: ${issuedAt}`],
           [],
-          ["Data", "Mercado Livre", "Shopee", "Avulso", "Total de pacotes", "Valor total do dia"],
-          ...report.days.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages, money(row.totalRevenue)]),
+          ["Data", "Mercado Livre", "Shopee", "Avulso", "Total de pacotes", "Valor total do dia", "LogManager"],
+          ...report.days.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages, money(row.totalRevenue), money(row.logManager)]),
           [],
-          ["TOTAL", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages, money(report.totals.totalRevenue)]
+          ["TOTAL", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages, money(report.totals.totalRevenue), money(report.totals.logManager)]
         ];
 
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 18 }];
+  sheet["!cols"] = [{ wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName(report.carrier.name));
   XLSX.writeFile(workbook, carrierReportFileName(report, "xlsx"));
 };

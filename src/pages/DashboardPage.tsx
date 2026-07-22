@@ -112,16 +112,17 @@ export const DashboardPage = () => {
           { label: "Total Shopee", value: String(report.totals.shopee) },
           { label: "Total Avulso", value: String(report.totals.avulso) },
           { label: "Total Geral de Pacotes", value: String(report.totals.totalPackages), tone: "dark" },
-          { label: "Valor Total Recebido", value: currency(report.totals.totalValue), tone: "red" }
+          { label: "Valor Total Recebido", value: currency(report.totals.totalValue), tone: "red" },
+          { label: "LogManager automatico", value: currency(report.totals.logManager), tone: "dark" }
         ]}
       />
 
       <DashboardChannelChart report={report} />
 
       <ResponsiveTable
-        columns={["Data", "Mercado Livre", "Shopee", "Avulso", "Total de Pacotes"]}
-        rows={report.rows.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages])}
-        footer={["Totais", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages]}
+        columns={["Data", "Mercado Livre", "Shopee", "Avulso", "Total de Pacotes", "LogManager"]}
+        rows={report.rows.map((row) => [formatDate(row.date), row.ml, row.shopee, row.avulso, row.totalPackages, currency(row.logManager)])}
+        footer={["Totais", report.totals.ml, report.totals.shopee, report.totals.avulso, report.totals.totalPackages, currency(report.totals.logManager)]}
       />
     </>
   );

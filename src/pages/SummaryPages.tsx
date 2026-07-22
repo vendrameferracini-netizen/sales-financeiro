@@ -23,12 +23,13 @@ const summaryRows = (summary: ReturnType<typeof buildPeriodSummary>) =>
       row.totalPackages,
       currency(row.totalRevenue),
       currency(row.partnerRevenue),
-      currency(row.difference)
+      currency(row.difference),
+      currency(row.logManager)
     ]);
 
 const SummaryTable = ({ summary }: { summary: ReturnType<typeof buildPeriodSummary> }) => (
   <ResponsiveTable
-    columns={["Transportadora", "ML", "Shopee", "Avulso", "Total", "Receita", "Parceria", "Diferenca"]}
+    columns={["Transportadora", "ML", "Shopee", "Avulso", "Total", "Receita", "Parceria", "Diferenca", "LogManager"]}
     rows={summaryRows(summary)}
     footer={[
       "Totais",
@@ -38,7 +39,8 @@ const SummaryTable = ({ summary }: { summary: ReturnType<typeof buildPeriodSumma
       summary.totals.totalPackages,
       currency(summary.totals.totalRevenue),
       currency(summary.totals.partnerRevenue),
-      currency(summary.totals.difference)
+      currency(summary.totals.difference),
+      currency(summary.totals.logManager)
     ]}
   />
 );
@@ -197,7 +199,8 @@ export const WeeklyPage = () => {
           { label: "Pacotes", value: String(summary.totals.totalPackages) },
           { label: "Receita total", value: currency(summary.totals.totalRevenue), tone: "red" },
           { label: "Receita parceria", value: currency(summary.totals.partnerRevenue) },
-          { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" }
+          { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" },
+          { label: "LogManager automatico", value: currency(summary.totals.logManager), tone: "red" }
         ]}
       />
       <CarrierExportPanel entries={entries} carriers={carriers} range={range} />
@@ -236,7 +239,8 @@ export const FortnightlyPage = () => {
           { label: "Total geral", value: String(summary.totals.totalPackages), tone: "dark" },
           { label: "Receita total", value: currency(summary.totals.totalRevenue), tone: "red" },
           { label: "Receita parceria", value: currency(summary.totals.partnerRevenue) },
-          { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" }
+          { label: "Diferenca", value: currency(summary.totals.difference), tone: "dark" },
+          { label: "LogManager automatico", value: currency(summary.totals.logManager), tone: "red" }
         ]}
       />
       <CarrierExportPanel entries={entries} carriers={carriers} range={range} />
@@ -283,7 +287,8 @@ export const MonthlyPage = () => {
           { label: "Valor ML do dia", value: currency(dailyReport.totals.valueMl) },
           { label: "Valor Shopee do dia", value: currency(dailyReport.totals.valueShopee) },
           { label: "Valor Avulso do dia", value: currency(dailyReport.totals.valueAvulso) },
-          { label: "Valor total do dia", value: currency(dailyReport.totals.totalValue), tone: "red" }
+          { label: "Valor total do dia", value: currency(dailyReport.totals.totalValue), tone: "red" },
+          { label: "LogManager do dia", value: currency(dailyReport.totals.logManager), tone: "dark" }
         ]}
       />
       <SummaryCards
@@ -291,7 +296,8 @@ export const MonthlyPage = () => {
           { label: "Total de pacotes", value: String(summary.totals.totalPackages), tone: "dark" },
           { label: "Receita total", value: currency(summary.totals.totalRevenue), tone: "red" },
           { label: "Receita parceria", value: currency(summary.totals.partnerRevenue) },
-          { label: "Diferenca total", value: currency(summary.totals.difference), tone: "dark" }
+          { label: "Diferenca total", value: currency(summary.totals.difference), tone: "dark" },
+          { label: "LogManager automatico", value: currency(summary.totals.logManager), tone: "red" }
         ]}
       />
       <div className="chart-grid">

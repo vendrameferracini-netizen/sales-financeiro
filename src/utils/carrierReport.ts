@@ -1,6 +1,6 @@
 import { Carrier, DailyEntry } from "../types";
 import { daysBetween, formatDate } from "./dates";
-import { getPackageTotal, normalizeCarrierInput } from "./calculations";
+import { getLogManagerValue, getPackageTotal, normalizeCarrierInput } from "./calculations";
 
 export type CarrierReportType = "summary" | "daily";
 export type CarrierReportFormat = "pdf" | "excel";
@@ -12,6 +12,7 @@ export type CarrierDailyReportRow = {
   avulso: number;
   totalPackages: number;
   totalRevenue: number;
+  logManager: number;
 };
 
 export type CarrierTransportReport = {
@@ -40,7 +41,8 @@ export const buildCarrierTransportReport = (
       shopee: input.shopee,
       avulso: input.avulso,
       totalPackages: getPackageTotal(input),
-      totalRevenue: carrierDayValue(carrier, input)
+      totalRevenue: carrierDayValue(carrier, input),
+      logManager: getLogManagerValue(carrier.name, getPackageTotal(input))
     };
     return row;
   }).filter((row) => row.totalPackages > 0);
@@ -51,9 +53,10 @@ export const buildCarrierTransportReport = (
       shopee: acc.shopee + row.shopee,
       avulso: acc.avulso + row.avulso,
       totalPackages: acc.totalPackages + row.totalPackages,
-      totalRevenue: acc.totalRevenue + row.totalRevenue
+      totalRevenue: acc.totalRevenue + row.totalRevenue,
+      logManager: acc.logManager + row.logManager
     }),
-    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalRevenue: 0 }
+    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalRevenue: 0, logManager: 0 }
   );
 
   return {

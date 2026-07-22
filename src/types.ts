@@ -34,6 +34,7 @@ export type CarrierSummary = {
   totalRevenue: number;
   partnerRevenue: number;
   difference: number;
+  logManager: number;
 };
 
 export type PeriodSummary = {
@@ -54,6 +55,7 @@ export type DailyEvolution = {
 export type CostSummary = {
   fixedCosts: number;
   logManager: number;
+  logManagerByCarrier: { carrierId: string; carrierName: string; packages: number; value: number }[];
   total: number;
   packages: number;
 };

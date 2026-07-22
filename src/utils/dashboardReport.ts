@@ -1,6 +1,6 @@
 import { Carrier, DailyEntry } from "../types";
 import { daysBetween, formatDate } from "./dates";
-import { getPackageTotal, normalizeCarrierInput } from "./calculations";
+import { getLogManagerValue, getPackageTotal, normalizeCarrierInput } from "./calculations";
 
 export type DashboardDailyRow = {
   date: string;
@@ -9,6 +9,7 @@ export type DashboardDailyRow = {
   avulso: number;
   totalPackages: number;
   totalValue: number;
+  logManager: number;
 };
 
 export type DashboardReport = {
@@ -26,14 +27,16 @@ export const buildDashboardReport = (entries: Record<string, DailyEntry>, carrie
       const row = carriers.reduce<DashboardDailyRow>(
         (acc, carrier) => {
           const input = normalizeCarrierInput(dailyInputs[carrier.id]);
+          const packages = getPackageTotal(input);
           acc.ml += input.ml;
           acc.shopee += input.shopee;
           acc.avulso += input.avulso;
-          acc.totalPackages += getPackageTotal(input);
+          acc.totalPackages += packages;
           acc.totalValue += input.ml * carrier.rates.ml + input.shopee * carrier.rates.shopee + input.avulso * carrier.rates.avulso;
+          acc.logManager += getLogManagerValue(carrier.name, packages);
           return acc;
         },
-        { date, ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalValue: 0 }
+        { date, ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalValue: 0, logManager: 0 }
       );
       return row;
     })
@@ -45,9 +48,10 @@ export const buildDashboardReport = (entries: Record<string, DailyEntry>, carrie
       shopee: acc.shopee + row.shopee,
       avulso: acc.avulso + row.avulso,
       totalPackages: acc.totalPackages + row.totalPackages,
-      totalValue: acc.totalValue + row.totalValue
+      totalValue: acc.totalValue + row.totalValue,
+      logManager: acc.logManager + row.logManager
     }),
-    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalValue: 0 }
+    { ml: 0, shopee: 0, avulso: 0, totalPackages: 0, totalValue: 0, logManager: 0 }
   );
 
   return {

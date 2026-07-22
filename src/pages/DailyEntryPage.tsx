@@ -78,20 +78,22 @@ export const DailyEntryPage = () => {
           { label: "Valor ML", value: currency(dailyReport.totals.valueMl) },
           { label: "Valor Shopee", value: currency(dailyReport.totals.valueShopee) },
           { label: "Valor Avulso", value: currency(dailyReport.totals.valueAvulso) },
-          { label: "Valor total", value: currency(dailyReport.totals.totalValue), tone: "red" }
+          { label: "Valor total", value: currency(dailyReport.totals.totalValue), tone: "red" },
+          { label: "LogManager automatico", value: currency(dailyReport.totals.logManager), tone: "dark" }
         ]}
       />
 
       <ResponsiveTable
-        columns={["Transportadora", "ML", "Shopee", "Avulso", "Total de pacotes", "Valor total"]}
-        rows={dailyReport.rows.map((row) => [row.carrierName, row.ml, row.shopee, row.avulso, row.totalPackages, currency(row.totalValue)])}
+        columns={["Transportadora", "ML", "Shopee", "Avulso", "Total de pacotes", "Valor total", "LogManager"]}
+        rows={dailyReport.rows.map((row) => [row.carrierName, row.ml, row.shopee, row.avulso, row.totalPackages, currency(row.totalValue), currency(row.logManager)])}
         footer={[
           "Totais",
           dailyReport.totals.ml,
           dailyReport.totals.shopee,
           dailyReport.totals.avulso,
           dailyReport.totals.totalPackages,
-          currency(dailyReport.totals.totalValue)
+          currency(dailyReport.totals.totalValue),
+          currency(dailyReport.totals.logManager)
         ]}
       />
 
