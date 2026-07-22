@@ -543,6 +543,94 @@ tfoot td {
   width: auto;
 }
 
+.dashboard-chart-panel {
+  padding: 18px;
+  margin-bottom: 20px;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.dashboard-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 270px;
+  margin-top: 18px;
+  padding: 12px 4px 0;
+  overflow-x: auto;
+  border-bottom: 2px solid #050505;
+}
+
+.dashboard-bar-group {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  min-width: 46px;
+  text-align: center;
+}
+
+.dashboard-bar-stack {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-height: 220px;
+}
+
+.dashboard-bar-stack span {
+  width: 9px;
+  border-radius: 5px 5px 0 0;
+}
+
+.bar-ml {
+  background: #050505;
+}
+
+.bar-shopee {
+  background: #d0101b;
+}
+
+.bar-avulso {
+  background: #777;
+}
+
+.dashboard-bar-group small {
+  color: #555;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.dashboard-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dashboard-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dashboard-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.empty-chart {
+  display: grid;
+  width: 100%;
+  place-items: center;
+  color: #777;
+  font-weight: 900;
+}
+
 .chart-panel {
   padding: 18px;
 }
@@ -846,5 +934,13 @@ tfoot td {
 
   .bar-chart {
     height: 180px;
+  }
+
+  .dashboard-bars {
+    min-height: 230px;
+  }
+
+  .dashboard-bar-stack {
+    min-height: 180px;
   }
 }

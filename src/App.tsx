@@ -2,6 +2,7 @@ import { ReactNode, useState } from "react";
 import { Layout, PageKey } from "./components/Layout";
 import { FinanceProvider, useFinance } from "./contexts/FinanceContext";
 import { DailyEntryPage } from "./pages/DailyEntryPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { CarriersPage } from "./pages/CarriersPage";
 import { CostsPage } from "./pages/CostsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -10,6 +11,7 @@ import { FortnightlyPage, MonthlyPage, WeeklyPage } from "./pages/SummaryPages";
 import { isSupabaseConfigured, supabaseConfigError } from "./utils/supabase";
 
 const pages: Record<PageKey, ReactNode> = {
+  dashboard: <DashboardPage />,
   daily: <DailyEntryPage />,
   weekly: <WeeklyPage />,
   fortnightly: <FortnightlyPage />,

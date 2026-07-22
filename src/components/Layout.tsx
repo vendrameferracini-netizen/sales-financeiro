@@ -1,9 +1,10 @@
 import { BarChart3, CalendarDays, Clock3, DollarSign, FileText, LogOut, Menu, TrendingUp, Truck, Wallet, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 
-export type PageKey = "daily" | "weekly" | "fortnightly" | "monthly" | "costs" | "profit" | "carriers";
+export type PageKey = "dashboard" | "daily" | "weekly" | "fortnightly" | "monthly" | "costs" | "profit" | "carriers";
 
 const navItems = [
+  { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "daily", label: "Lancamento Diario", icon: CalendarDays },
   { key: "weekly", label: "Semanal", icon: Clock3 },
   { key: "fortnightly", label: "Quinzenal", icon: FileText },
