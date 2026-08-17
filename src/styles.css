@@ -500,10 +500,100 @@ label input {
   font-size: 18px;
 }
 
+.technical-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.technical-panel-header h2 {
+  margin: 0;
+}
+
+.debug-copy-fixed {
+  position: fixed;
+  right: 18px;
+  bottom: 84px;
+  z-index: 50;
+  border-color: #d0101b;
+  background: #d0101b;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+
+.copy-feedback {
+  display: inline-flex;
+  margin-top: 10px;
+  color: #0f6f35;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.debug-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.debug-stage-card {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.debug-stage-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debug-stage-card strong,
+.debug-stage-card span,
+.debug-stage-card small {
+  display: block;
+}
+
+.debug-stage-card small {
+  margin-top: 8px;
+  color: #555;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.debug-stage-card.running {
+  border-color: #d0101b;
+  background: #fff5f6;
+}
+
+.debug-stage-card.success {
+  border-color: #138a41;
+  background: #effaf2;
+}
+
+.debug-stage-card.error,
+.debug-stage-card.timeout {
+  border-color: #d0101b;
+  background: #fff1f2;
+}
+
 .technical-panel article {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #e5e5e5;
+}
+
+.technical-panel details {
+  margin-top: 14px;
+}
+
+.technical-panel summary {
+  cursor: pointer;
+  font-weight: 950;
 }
 
 .technical-panel pre {

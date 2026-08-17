@@ -17,6 +17,24 @@ const buildBlankDraft = (carriers: Carrier[]) =>
     return acc;
   }, {});
 
+const debugStages: SaveDebugStep["stage"][] = ["ETAPA 1 - INÍCIO", "ETAPA 2 - DAILY_ENTRIES", "ETAPA 3 - PACKAGE_ENTRIES", "ETAPA 4 - CONFIRMAÇÃO"];
+
+const debugStatusLabel: Record<SaveDebugStep["status"], string> = {
+  waiting: "⏳ aguardando",
+  running: "🔄 executando",
+  success: "✅ concluída",
+  error: "❌ erro",
+  timeout: "⏱ timeout"
+};
+
+const waitingDebugSteps = (): SaveDebugStep[] =>
+  debugStages.map((stage) => ({
+    stage,
+    status: "waiting",
+    label: "AGUARDANDO",
+    timestamp: new Date().toISOString()
+  }));
+
 export const DailyEntryPage = () => {
   const { carriers, getEntry, saveEntry } = useFinance();
   const activeCarriers = useMemo(() => carriers.filter((carrier) => carrier.active), [carriers]);
@@ -26,6 +44,7 @@ export const DailyEntryPage = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [debugSteps, setDebugSteps] = useState<SaveDebugStep[]>([]);
+  const [copiedDebug, setCopiedDebug] = useState(false);
 
   useEffect(() => {
     const entry = getEntry(date);
@@ -67,16 +86,26 @@ export const DailyEntryPage = () => {
   };
 
   const handleSave = async () => {
-    const payload = activeCarriers.map((carrier) => ({
-      date,
-      app_id: APP_ID,
-      company_id: COMPANY_ID,
-      carrier_id: carrier.id,
-      transportadora: carrier.name,
-      ...normalizeCarrierInput(draft[carrier.id])
-    }));
+    const payload = activeCarriers
+      .map((carrier) => ({
+        date,
+        app_id: APP_ID,
+        company_id: COMPANY_ID,
+        carrier_id: carrier.id,
+        transportadora: carrier.name,
+        ...normalizeCarrierInput(draft[carrier.id])
+      }))
+      .filter((item) => (Number(item.ml) || 0) + (Number(item.shopee) || 0) + (Number(item.avulso) || 0) > 0);
+    const startStep: SaveDebugStep = {
+      stage: "ETAPA 1 - INÍCIO",
+      status: "success",
+      label: "INICIO_SAVE",
+      payload,
+      timestamp: new Date().toISOString()
+    };
     console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
-    setDebugSteps([{ stage: "ETAPA 1 - INICIO_SAVE", payload }]);
+    setDebugSteps([...waitingDebugSteps(), startStep]);
+    setCopiedDebug(false);
     setSaving(true);
     setSaved(false);
     setSaveError("");
@@ -94,6 +123,38 @@ export const DailyEntryPage = () => {
       setSaving(false);
     }
   };
+
+  const copyDebug = async () => {
+    const content = JSON.stringify(
+      {
+        date,
+        app_id: APP_ID,
+        company_id: COMPANY_ID,
+        saving,
+        saved,
+        saveError,
+        steps: debugSteps
+      },
+      null,
+      2
+    );
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = content;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopiedDebug(true);
+  };
+
+  const latestDebugByStage = debugStages.map((stage) => [...debugSteps].reverse().find((step) => step.stage === stage) || waitingDebugSteps().find((step) => step.stage === stage)!);
 
   return (
     <>
@@ -144,13 +205,28 @@ export const DailyEntryPage = () => {
 
       {debugSteps.length > 0 && (
         <section className="status-panel technical-panel">
-          <h2>Diagnostico tecnico do salvamento</h2>
-          {debugSteps.map((step, index) => (
-            <article key={`${step.stage}-${index}`}>
-              <strong>{step.stage}</strong>
-              <pre>{JSON.stringify(step, null, 2)}</pre>
-            </article>
-          ))}
+          <div className="technical-panel-header">
+            <h2>Diagnostico tecnico do salvamento</h2>
+            <button type="button" className="secondary-button compact-button debug-copy-fixed" onClick={copyDebug}>
+              COPIAR DIAGNÓSTICO
+            </button>
+          </div>
+          {copiedDebug && <span className="copy-feedback">Diagnostico copiado.</span>}
+          <div className="debug-stage-grid">
+            {latestDebugByStage.map((step) => (
+              <article className={`debug-stage-card ${step.status}`} key={step.stage}>
+                <div>
+                  <strong>{step.stage}</strong>
+                  <span>{debugStatusLabel[step.status]}</span>
+                </div>
+                <small>{step.label}</small>
+              </article>
+            ))}
+          </div>
+          <details open>
+            <summary>Eventos tecnicos completos</summary>
+            <pre>{JSON.stringify(debugSteps, null, 2)}</pre>
+          </details>
         </section>
       )}
 

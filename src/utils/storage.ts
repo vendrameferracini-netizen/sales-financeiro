@@ -21,6 +21,16 @@ type SupabaseResult<T> = {
 const errorDetails = (error: unknown) => error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
 
 const serializableError = (error: unknown) => {
+  if (error instanceof DiagnosticTimeoutError) {
+    return {
+      name: error.name,
+      message: error.message,
+      table: error.table,
+      operation: error.operation,
+      payload: error.payload,
+      elapsedMs: error.elapsedMs
+    };
+  }
   if (error instanceof SupabaseOperationError) {
     return { message: error.message, table: error.table, operation: error.operation, payload: error.payload, details: error.details };
   }
@@ -68,6 +78,19 @@ class SupabaseOperationError extends Error {
     public details: unknown
   ) {
     super(getSupabaseErrorMessage(errorDetails(details), `Erro Supabase em ${table}.${operation}`));
+  }
+}
+
+class DiagnosticTimeoutError extends Error {
+  name = "DiagnosticTimeoutError";
+
+  constructor(
+    public table: string,
+    public operation: string,
+    public payload: unknown,
+    public elapsedMs: number
+  ) {
+    super(`TIMEOUT em ${table}.${operation} apos ${elapsedMs}ms`);
   }
 }
 
@@ -296,6 +319,75 @@ const packageDebugPayload = (row: ReturnType<typeof packageRow>, carriers: Carri
   ...row,
   carrier_name: carriers.find((carrier) => carrier.id === row.carrier_id)?.name || "Transportadora nao encontrada"
 });
+
+const DEBUG_TIMEOUT_MS = 15000;
+
+const debugTimestamp = () => new Date().toISOString();
+
+const debugStatusForError = (error: unknown) => (error instanceof DiagnosticTimeoutError ? "timeout" : "error");
+
+const runDiagnosticSupabase = async <T,>(
+  stage: SaveDebugStep["stage"],
+  beforeLabel: string,
+  afterLabel: string,
+  table: string,
+  operation: string,
+  payload: unknown,
+  request: () => Promise<SupabaseResult<T>>,
+  emit?: (step: SaveDebugStep) => void
+) => {
+  const startedAt = Date.now();
+  emit?.({
+    stage,
+    status: "running",
+    label: beforeLabel,
+    table,
+    operation,
+    payload,
+    timestamp: debugTimestamp()
+  });
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new DiagnosticTimeoutError(table, operation, payload, Date.now() - startedAt)), DEBUG_TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([request(), timeoutPromise]);
+    if (timeoutId) clearTimeout(timeoutId);
+    const status = result.error ? "error" : "success";
+    emit?.({
+      stage,
+      status,
+      label: afterLabel,
+      table,
+      operation,
+      payload,
+      httpStatus: result.status,
+      statusText: result.statusText,
+      data: result.data,
+      error: result.error ? serializableError(result.error) : undefined,
+      elapsedMs: Date.now() - startedAt,
+      timestamp: debugTimestamp()
+    });
+    if (result.error) throw new SupabaseOperationError(table, operation, payload, result.error);
+    return result;
+  } catch (error) {
+    if (timeoutId) clearTimeout(timeoutId);
+    emit?.({
+      stage,
+      status: debugStatusForError(error),
+      label: error instanceof DiagnosticTimeoutError ? "TIMEOUT" : afterLabel,
+      table,
+      operation,
+      payload,
+      error: serializableError(error),
+      elapsedMs: Date.now() - startedAt,
+      timestamp: debugTimestamp()
+    });
+    throw error;
+  }
+};
 
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID);
 
@@ -582,25 +674,42 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   const company = salesCompany;
   const emit = (step: SaveDebugStep) => onDebugStep?.(step);
   const normalizedDate = normalizeEntryDate(entry.date);
-  const normalizedEntry: DailyEntry = { ...entry, date: normalizedDate };
   const dailyPayload = {
     ...rowCompanyPayload(),
     date: normalizedDate,
     updated_at: new Date().toISOString()
   };
+  const nonZeroCarriers = Object.fromEntries(
+    Object.entries(entry.carriers || {})
+      .map(([carrierId, input]) => [carrierId, packageInputFromRow(input as unknown as DbRow)] as const)
+      .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
+  );
 
   emit({
-    stage: "ETAPA 1 - INICIO_SAVE",
-    payload: { input_date: entry.date, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID, carriers: normalizedEntry.carriers }
+    stage: "ETAPA 1 - INÍCIO",
+    status: "success",
+    label: "INICIO_SAVE",
+    payload: { input_date: entry.date, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID, carriers: nonZeroCarriers },
+    timestamp: debugTimestamp()
   });
-  await debugReadEntryDate(normalizedDate, "before_save");
+
   console.log("TENTANDO_SALVAR_DAILY_ENTRIES", { table: "daily_entries", operation: "save", payload: dailyPayload });
-  const existingResult = await runSupabase<DbRow[]>(
+  const existingResult = await runDiagnosticSupabase<DbRow[]>(
+    "ETAPA 2 - DAILY_ENTRIES",
+    "ANTES_DAILY_ENTRIES",
+    "DEPOIS_DAILY_ENTRIES",
     "daily_entries",
     "select_before_save",
     { app_id: APP_ID, company_id: COMPANY_ID, input_date: entry.date, normalized_date: normalizedDate },
-    () => selectDailyEntryByDate(normalizedDate),
-    { throwOnError: true }
+    () =>
+      runSupabase<DbRow[]>(
+        "daily_entries",
+        "select_before_save",
+        { app_id: APP_ID, company_id: COMPANY_ID, input_date: entry.date, normalized_date: normalizedDate },
+        () => selectDailyEntryByDate(normalizedDate),
+        { throwOnError: true }
+      ),
+    emit
   );
   const existing = ((existingResult.data || []) as DbRow[])
     .filter((row) => companyMatches(row, company) && rowDate(row) === normalizedDate)
@@ -608,45 +717,50 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
 
   const dailyOperation = existing?.id ? "update" : "insert";
   const dailyOperationPayload = existing?.id ? { id: text(existing, ["id"]), ...dailyPayload } : { id: "generated", ...dailyPayload };
-  emit({ stage: "ETAPA 2 - DAILY_ENTRIES", operation: dailyOperation, payload: dailyOperationPayload });
   let dailyResult: SupabaseResult<DbRow>;
-  try {
-    dailyResult = existing?.id
-      ? await runSupabase<DbRow>(
-          "daily_entries",
-          "update",
-          dailyOperationPayload,
-          () =>
-            requireSupabase()
-              .from("daily_entries")
-              .update(dailyPayload)
-              .eq("id", text(existing, ["id"]))
-              .eq("company_id", COMPANY_ID)
-              .eq("app_id", APP_ID)
-              .select("*")
-              .maybeSingle(),
-          { throwOnError: true }
-        )
-      : await runSupabase<DbRow>(
-          "daily_entries",
-          "insert",
-          dailyOperationPayload,
-          () => requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle(),
-          { throwOnError: true }
-        );
-    emit({
-      stage: "ETAPA 2 - DAILY_ENTRIES",
-      operation: dailyOperation,
-      payload: dailyOperationPayload,
-      status: dailyResult.status,
-      statusText: dailyResult.statusText,
-      data: dailyResult.data,
-      error: dailyResult.error
-    });
-  } catch (error) {
-    emit({ stage: "ETAPA 2 - DAILY_ENTRIES", operation: dailyOperation, payload: dailyOperationPayload, error: serializableError(error) });
-    throw error;
-  }
+  dailyResult = existing?.id
+    ? await runDiagnosticSupabase<DbRow>(
+        "ETAPA 2 - DAILY_ENTRIES",
+        "ANTES_DAILY_ENTRIES",
+        "DEPOIS_DAILY_ENTRIES",
+        "daily_entries",
+        "update",
+        dailyOperationPayload,
+        () =>
+          runSupabase<DbRow>(
+            "daily_entries",
+            "update",
+            dailyOperationPayload,
+            () =>
+              requireSupabase()
+                .from("daily_entries")
+                .update(dailyPayload)
+                .eq("id", text(existing, ["id"]))
+                .eq("company_id", COMPANY_ID)
+                .eq("app_id", APP_ID)
+                .select("*")
+                .maybeSingle(),
+            { throwOnError: true }
+          ),
+        emit
+      )
+    : await runDiagnosticSupabase<DbRow>(
+        "ETAPA 2 - DAILY_ENTRIES",
+        "ANTES_DAILY_ENTRIES",
+        "DEPOIS_DAILY_ENTRIES",
+        "daily_entries",
+        "insert",
+        dailyOperationPayload,
+        () =>
+          runSupabase<DbRow>(
+            "daily_entries",
+            "insert",
+            dailyOperationPayload,
+            () => requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle(),
+            { throwOnError: true }
+          ),
+        emit
+      );
 
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
@@ -665,15 +779,26 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     payload: rows.map((row) => packageDebugPayload(row, carriers))
   });
 
-  const existingPackagesResult = await runSupabase<DbRow[]>(
+  const existingPackagesResult = await runDiagnosticSupabase<DbRow[]>(
+    "ETAPA 3 - PACKAGE_ENTRIES",
+    "ANTES_PACKAGE_ENTRIES",
+    "DEPOIS_PACKAGE_ENTRIES",
     "package_entries",
     "select_before_replace",
     { daily_entry_id: dailyId, app_id: APP_ID, company_id: COMPANY_ID, date: entry.date },
-    () => selectPackageEntriesByDailyId(dailyId),
-    { throwOnError: true }
+    () =>
+      runSupabase<DbRow[]>(
+        "package_entries",
+        "select_before_replace",
+        { daily_entry_id: dailyId, app_id: APP_ID, company_id: COMPANY_ID, date: entry.date },
+        () => selectPackageEntriesByDailyId(dailyId),
+        { throwOnError: true }
+      ),
+    emit
   );
   const existingPackages = ((existingPackagesResult.data || []) as DbRow[]).filter((row) => companyMatches(row, company));
   const desiredCarrierIds = new Set(rows.map((row) => String(row.carrier_id)));
+  const confirmedPackageRows: DbRow[] = [];
 
   for (const row of rows) {
     const existingPackage = existingPackages.find((item) => text(item, ["carrier_id", "transportadora_id"]) === String(row.carrier_id));
@@ -689,67 +814,75 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
 
     if (existingPackage?.id) {
       const packageOperationPayload = { id: text(existingPackage, ["id"]), date: normalizedDate, ...packagePayload };
-      emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "update", payload: packageOperationPayload });
-      try {
-        const packageResult = await runSupabase(
-          "package_entries",
-          "update",
-          packageOperationPayload,
-          () =>
-            requireSupabase()
-              .from("package_entries")
-              .update(packagePayload)
-              .eq("id", text(existingPackage, ["id"]))
-              .eq("company_id", COMPANY_ID)
-              .eq("app_id", APP_ID)
-              .select("*"),
-          { throwOnError: true }
-        );
-        emit({
-          stage: "ETAPA 3 - PACKAGE_ENTRIES",
-          operation: "update",
-          payload: packageOperationPayload,
-          status: packageResult.status,
-          statusText: packageResult.statusText,
-          data: packageResult.data,
-          error: packageResult.error
-        });
-      } catch (error) {
-        emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "update", payload: packageOperationPayload, error: serializableError(error) });
-        throw error;
-      }
+      await runDiagnosticSupabase(
+        "ETAPA 3 - PACKAGE_ENTRIES",
+        "ANTES_PACKAGE_ENTRIES",
+        "DEPOIS_PACKAGE_ENTRIES",
+        "package_entries",
+        "update",
+        packageOperationPayload,
+        () =>
+          runSupabase(
+            "package_entries",
+            "update",
+            packageOperationPayload,
+            () =>
+              requireSupabase()
+                .from("package_entries")
+                .update(packagePayload)
+                .eq("id", text(existingPackage, ["id"]))
+                .eq("company_id", COMPANY_ID)
+                .eq("app_id", APP_ID)
+                .select("*"),
+            { throwOnError: true }
+          ),
+        emit
+      );
     } else {
       const packageOperationPayload = { date: normalizedDate, ...packageDebugPayload(row, carriers) };
-      emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "insert", payload: packageOperationPayload });
-      try {
-        const packageResult = await runSupabase(
-          "package_entries",
-          "insert",
-          packageOperationPayload,
-          () => requireSupabase().from("package_entries").insert(row).select("*"),
-          { throwOnError: true }
-        );
-        emit({
-          stage: "ETAPA 3 - PACKAGE_ENTRIES",
-          operation: "insert",
-          payload: packageOperationPayload,
-          status: packageResult.status,
-          statusText: packageResult.statusText,
-          data: packageResult.data,
-          error: packageResult.error
-        });
-      } catch (error) {
-        emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "insert", payload: packageOperationPayload, error: serializableError(error) });
-        throw error;
-      }
+      await runDiagnosticSupabase(
+        "ETAPA 3 - PACKAGE_ENTRIES",
+        "ANTES_PACKAGE_ENTRIES",
+        "DEPOIS_PACKAGE_ENTRIES",
+        "package_entries",
+        "insert",
+        packageOperationPayload,
+        () =>
+          runSupabase(
+            "package_entries",
+            "insert",
+            packageOperationPayload,
+            () => requireSupabase().from("package_entries").insert(row).select("*"),
+            { throwOnError: true }
+          ),
+        emit
+      );
     }
 
-    const confirmedResult = await runSupabase<DbRow[]>(
+    const confirmationPayload = {
+      input_date: entry.date,
+      normalized_date: normalizedDate,
+      daily_entry_id: dailyId,
+      carrier_id: row.carrier_id,
+      app_id: APP_ID,
+      company_id: COMPANY_ID
+    };
+    const confirmedResult = await runDiagnosticSupabase<DbRow[]>(
+      "ETAPA 4 - CONFIRMAÇÃO",
+      "ANTES_CONFIRMACAO",
+      "DEPOIS_CONFIRMACAO",
       "package_entries",
       "confirm_by_daily_entry_and_carrier",
-      { input_date: entry.date, normalized_date: normalizedDate, daily_entry_id: dailyId, carrier_id: row.carrier_id, app_id: APP_ID, company_id: COMPANY_ID },
-      () => selectConfirmedPackageEntry(dailyId, String(row.carrier_id)),
-      { throwOnError: true }
+      confirmationPayload,
+      () =>
+        runSupabase<DbRow[]>(
+          "package_entries",
+          "confirm_by_daily_entry_and_carrier",
+          confirmationPayload,
+          () => selectConfirmedPackageEntry(dailyId, String(row.carrier_id)),
+          { throwOnError: true }
+        ),
+      emit
     );
     const confirmedRow = ((confirmedResult.data || []) as DbRow[]).find(
       (item) =>
@@ -765,11 +898,15 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
         }.`
       );
     }
+    confirmedPackageRows.push(confirmedRow);
     emit({
-      stage: "ETAPA 4 - CONFIRMACAO",
+      stage: "ETAPA 4 - CONFIRMAÇÃO",
+      status: "success",
+      label: "CONFIRMACAO_NO_SUPABASE",
+      table: "package_entries",
       operation: "select",
-      payload: { input_date: entry.date, normalized_date: normalizedDate, daily_entry_id: dailyId, carrier_id: row.carrier_id, app_id: APP_ID, company_id: COMPANY_ID },
-      status: confirmedResult.status,
+      payload: confirmationPayload,
+      httpStatus: confirmedResult.status,
       statusText: confirmedResult.statusText,
       data: confirmedResult.data,
       records: ((confirmedResult.data || []) as DbRow[]).map((item) => ({
@@ -782,7 +919,8 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
         avulso: num(item, ["avulso", "avulso_count", "quantidade_avulso"]),
         app_id: text(item, ["app_id"]),
         company_id: text(item, ["company_id", "id_da_empresa"])
-      }))
+      })),
+      timestamp: debugTimestamp()
     });
   }
 
@@ -792,18 +930,26 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   });
 
   for (const stalePackage of stalePackages) {
-    await runSupabase(
+    await runDiagnosticSupabase(
+      "ETAPA 3 - PACKAGE_ENTRIES",
+      "ANTES_PACKAGE_ENTRIES",
+      "DEPOIS_PACKAGE_ENTRIES",
       "package_entries",
       "delete_stale_for_daily_entry",
       { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID },
-      () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
-      { throwOnError: true }
+      () =>
+        runSupabase(
+          "package_entries",
+          "delete_stale_for_daily_entry",
+          { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID },
+          () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
+          { throwOnError: true }
+        ),
+      emit
     );
   }
 
-  const freshEntry = await loadEntryByDate(normalizedDate);
-  await debugReadEntryDate(normalizedDate, "after_save");
-  if (!freshEntry) throw new Error(`Lancamento de ${normalizedDate} nao foi encontrado no Supabase apos salvar.`);
+  const freshEntry = buildEntryFromRows(normalizedDate, [((dailyResult.data || existing) as DbRow)], confirmedPackageRows) || { date: normalizedDate, carriers: {} };
   const expectedRows = rows.filter((row) => (Number(row.ml) || 0) + (Number(row.shopee) || 0) + (Number(row.avulso) || 0) > 0);
   const confirmedRows = expectedRows.filter((row) => {
     const confirmedInput = freshEntry.carriers[String(row.carrier_id)];
