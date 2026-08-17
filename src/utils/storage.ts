@@ -69,6 +69,17 @@ const logSupabaseError = (table: string, operation: string, payload: unknown, er
   console.error({ table, operation, payload, error });
 };
 
+const logNamedSupabaseError = (label: string, error: unknown) => {
+  const details = errorDetails(error);
+  console.error(label, {
+    code: details.code,
+    message: details.message,
+    details: details.details,
+    hint: details.hint,
+    error
+  });
+};
+
 const logSupabaseSuccess = <T,>(table: string, operation: string, payload: unknown, data: T | null) => {
   const rowCount = Array.isArray(data) ? data.length : data ? 1 : 0;
   console.log("Resposta do Supabase", { table, operation, payload, rowCount, data });
@@ -85,13 +96,19 @@ const runSupabase = async <T,>(
     const result = await request();
     if (result.error) {
       logSupabaseError(table, operation, payload, result.error);
+      if (table === "daily_entries") logNamedSupabaseError("ERRO_DAILY_ENTRIES", result.error);
+      if (table === "package_entries") logNamedSupabaseError("ERRO_PACKAGE_ENTRIES", result.error);
       if (options.throwOnError) throw new SupabaseOperationError(table, operation, payload, result.error);
     } else {
       logSupabaseSuccess(table, operation, payload, result.data);
+      if (table === "daily_entries" && ["insert", "update"].includes(operation)) console.log("SALVOU_DAILY_ENTRIES", { payload, data: result.data });
+      if (table === "package_entries" && ["insert", "update"].includes(operation)) console.log("SALVOU_PACKAGE_ENTRIES", { payload, data: result.data });
     }
     return result;
   } catch (error) {
     logSupabaseError(table, operation, payload, error);
+    if (table === "daily_entries") logNamedSupabaseError("ERRO_DAILY_ENTRIES", error);
+    if (table === "package_entries") logNamedSupabaseError("ERRO_PACKAGE_ENTRIES", error);
     if (options.throwOnError) throw new SupabaseOperationError(table, operation, payload, error);
     return { data: null, error } as SupabaseResult<T>;
   }
@@ -495,7 +512,7 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   };
 
   await debugReadEntryDate(entry.date, "before_save");
-  console.log("Salvando no Supabase", { table: "daily_entries", operation: "save", payload: dailyPayload });
+  console.log("TENTANDO_SALVAR_DAILY_ENTRIES", { table: "daily_entries", operation: "save", payload: dailyPayload });
   const existingResult = await runSupabase<DbRow[]>(
     "daily_entries",
     "select_before_save",
@@ -536,7 +553,7 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
     .map(([carrierId, input]) => packageRow(dailyId, carrierId, input));
 
-  console.log("Payload enviado ao Supabase", {
+  console.log("TENTANDO_SALVAR_PACKAGE_ENTRIES", {
     table: "package_entries",
     operation: "replace_for_daily_entry",
     date: entry.date,
@@ -610,6 +627,27 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   const freshEntry = await loadEntryByDate(entry.date);
   await debugReadEntryDate(entry.date, "after_save");
   if (!freshEntry) throw new Error(`Lancamento de ${entry.date} nao foi encontrado no Supabase apos salvar.`);
+  const expectedRows = rows.filter((row) => (Number(row.ml) || 0) + (Number(row.shopee) || 0) + (Number(row.avulso) || 0) > 0);
+  const confirmedRows = expectedRows.filter((row) => {
+    const confirmedInput = freshEntry.carriers[String(row.carrier_id)];
+    return (
+      confirmedInput &&
+      Number(confirmedInput.ml) === Number(row.ml) &&
+      Number(confirmedInput.shopee) === Number(row.shopee) &&
+      Number(confirmedInput.avulso) === Number(row.avulso)
+    );
+  });
+  console.log("CONFIRMACAO_NO_SUPABASE", {
+    date: entry.date,
+    app_id: APP_ID,
+    company_id: COMPANY_ID,
+    expected_package_entries: expectedRows.length,
+    confirmed_package_entries: confirmedRows.length,
+    freshEntry
+  });
+  if (confirmedRows.length !== expectedRows.length) {
+    throw new Error(`Supabase nao confirmou todos os pacotes do lancamento de ${entry.date}. Esperado: ${expectedRows.length}. Confirmado: ${confirmedRows.length}.`);
+  }
   return freshEntry;
 };
 

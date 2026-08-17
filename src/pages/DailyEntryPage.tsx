@@ -4,6 +4,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
 import { useFinance } from "../contexts/FinanceContext";
+import { APP_ID, COMPANY_ID } from "../data/app";
 import { Carrier, DailyCarrierInput } from "../types";
 import { addDays, formatDate, todayISO } from "../utils/dates";
 import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
@@ -54,14 +55,25 @@ export const DailyEntryPage = () => {
   };
 
   const handleSave = async () => {
+    const payload = activeCarriers.map((carrier) => ({
+      date,
+      app_id: APP_ID,
+      company_id: COMPANY_ID,
+      carrier_id: carrier.id,
+      transportadora: carrier.name,
+      ...normalizeCarrierInput(draft[carrier.id])
+    }));
+    console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
     setSaving(true);
     setSaved(false);
     setSaveError("");
     try {
       await saveEntry(date, draft);
       setSaved(true);
+      console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Nao foi possivel salvar os dados no Supabase.";
+      console.error("ERRO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
       setSaveError(message);
     } finally {
       setSaving(false);
