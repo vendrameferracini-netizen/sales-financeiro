@@ -168,6 +168,25 @@ const rowTimestamp = (row: DbRow) => {
   return Number.isFinite(time) ? time : 0;
 };
 
+const rowTime = (row: DbRow, keys: string[]) => {
+  const value = text(row, keys);
+  const time = value ? Date.parse(value) : 0;
+  return Number.isFinite(time) ? time : 0;
+};
+
+const activePackageSort = (first: DbRow, second: DbRow) => {
+  const updatedDiff = rowTime(first, ["updated_at"]) - rowTime(second, ["updated_at"]);
+  if (updatedDiff !== 0) return updatedDiff;
+  return rowTime(first, ["created_at", "criado_em"]) - rowTime(second, ["created_at", "criado_em"]);
+};
+
+const latestPackageForCarrier = (rows: DbRow[], carrierId: string) => {
+  const matches = rows
+    .filter((row) => text(row, ["carrier_id", "transportadora_id"]) === carrierId)
+    .sort(activePackageSort);
+  return matches[matches.length - 1];
+};
+
 const rowDate = (row: DbRow) => normalizeEntryDate(text(row, ["date", "data", "entry_date"]));
 
 const bool = (row: DbRow, keys: string[], fallback = true) => {
@@ -398,7 +417,7 @@ const buildEntryFromRows = (date: string, dailyRows: DbRow[], packageRows: DbRow
 
     packageRows
       .filter((row) => text(row, ["daily_entry_id", "entry_id", "daily_id"]) === dailyId)
-      .sort((first, second) => rowTimestamp(first) - rowTimestamp(second))
+      .sort(activePackageSort)
       .forEach((row) => {
         const carrierId = text(row, ["carrier_id", "transportadora_id"]);
         if (carrierId) acc[carrierId] = packageInputFromRow(row);
@@ -675,7 +694,7 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   const desiredCarrierIds = new Set(rows.map((row) => String(row.carrier_id)));
 
   for (const row of rows) {
-    const existingPackage = existingPackages.find((item) => text(item, ["carrier_id", "transportadora_id"]) === String(row.carrier_id));
+    const existingPackage = latestPackageForCarrier(existingPackages, String(row.carrier_id));
     const packagePayload = {
       ...rowCompanyPayload(),
       daily_entry_id: dailyId,
