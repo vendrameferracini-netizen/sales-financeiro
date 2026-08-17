@@ -1,5 +1,5 @@
 import { APP_ID, COMPANY_ID } from "../data/app";
-import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
+import { Carrier, DailyCarrierInput, DailyEntry, FixedCost, SaveDebugStep } from "../types";
 import { requireSupabase } from "./supabase";
 
 type DbRow = Record<string, unknown>;
@@ -18,6 +18,14 @@ type SupabaseResult<T> = {
 };
 
 const errorDetails = (error: unknown) => error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+
+const serializableError = (error: unknown) => {
+  if (error instanceof SupabaseOperationError) {
+    return { message: error.message, table: error.table, operation: error.operation, payload: error.payload, details: error.details };
+  }
+  if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack };
+  return error;
+};
 
 const getSupabaseErrorMessage = (error: unknown, fallback: string) => {
   if (error instanceof Error) return error.message;
@@ -540,14 +548,16 @@ export const deleteCarrier = async (id: string) => {
   return !result.error;
 };
 
-export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []) => {
+export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = [], onDebugStep?: (step: SaveDebugStep) => void) => {
   const company = salesCompany;
+  const emit = (step: SaveDebugStep) => onDebugStep?.(step);
   const dailyPayload = {
     ...rowCompanyPayload(),
     date: entry.date,
     updated_at: new Date().toISOString()
   };
 
+  emit({ stage: "ETAPA 1 - INICIO_SAVE", payload: { date: entry.date, app_id: APP_ID, company_id: COMPANY_ID, carriers: entry.carriers } });
   await debugReadEntryDate(entry.date, "before_save");
   console.log("TENTANDO_SALVAR_DAILY_ENTRIES", { table: "daily_entries", operation: "save", payload: dailyPayload });
   const existingResult = await runSupabase<DbRow[]>(
@@ -559,29 +569,47 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   );
   const existing = ((existingResult.data || []) as DbRow[]).find((row) => companyMatches(row, company) && text(row, ["date", "data", "entry_date"]) === entry.date);
 
-  const dailyResult = existing?.id
-    ? await runSupabase<DbRow>(
-        "daily_entries",
-        "update",
-        { id: text(existing, ["id"]), ...dailyPayload },
-        () =>
-          requireSupabase()
-            .from("daily_entries")
-            .update(dailyPayload)
-            .eq("id", text(existing, ["id"]))
-            .eq("company_id", COMPANY_ID)
-            .eq("app_id", APP_ID)
-            .select("*")
-            .maybeSingle(),
-        { throwOnError: true }
-      )
-    : await runSupabase<DbRow>(
-        "daily_entries",
-        "insert",
-        { id: "generated", ...dailyPayload },
-        () => requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle(),
-        { throwOnError: true }
-      );
+  const dailyOperation = existing?.id ? "update" : "insert";
+  const dailyOperationPayload = existing?.id ? { id: text(existing, ["id"]), ...dailyPayload } : { id: "generated", ...dailyPayload };
+  emit({ stage: "ETAPA 2 - DAILY_ENTRIES", operation: dailyOperation, payload: dailyOperationPayload });
+  let dailyResult: SupabaseResult<DbRow>;
+  try {
+    dailyResult = existing?.id
+      ? await runSupabase<DbRow>(
+          "daily_entries",
+          "update",
+          dailyOperationPayload,
+          () =>
+            requireSupabase()
+              .from("daily_entries")
+              .update(dailyPayload)
+              .eq("id", text(existing, ["id"]))
+              .eq("company_id", COMPANY_ID)
+              .eq("app_id", APP_ID)
+              .select("*")
+              .maybeSingle(),
+          { throwOnError: true }
+        )
+      : await runSupabase<DbRow>(
+          "daily_entries",
+          "insert",
+          dailyOperationPayload,
+          () => requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle(),
+          { throwOnError: true }
+        );
+    emit({
+      stage: "ETAPA 2 - DAILY_ENTRIES",
+      operation: dailyOperation,
+      payload: dailyOperationPayload,
+      status: dailyResult.status,
+      statusText: dailyResult.statusText,
+      data: dailyResult.data,
+      error: dailyResult.error
+    });
+  } catch (error) {
+    emit({ stage: "ETAPA 2 - DAILY_ENTRIES", operation: dailyOperation, payload: dailyOperationPayload, error: serializableError(error) });
+    throw error;
+  }
 
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
@@ -622,27 +650,60 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     };
 
     if (existingPackage?.id) {
-      await runSupabase(
-        "package_entries",
-        "update",
-        { id: text(existingPackage, ["id"]), date: entry.date, ...packagePayload },
-        () =>
-          requireSupabase()
-            .from("package_entries")
-            .update(packagePayload)
-            .eq("id", text(existingPackage, ["id"]))
-            .eq("company_id", COMPANY_ID)
-            .eq("app_id", APP_ID),
-        { throwOnError: true }
-      );
+      const packageOperationPayload = { id: text(existingPackage, ["id"]), date: entry.date, ...packagePayload };
+      emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "update", payload: packageOperationPayload });
+      try {
+        const packageResult = await runSupabase(
+          "package_entries",
+          "update",
+          packageOperationPayload,
+          () =>
+            requireSupabase()
+              .from("package_entries")
+              .update(packagePayload)
+              .eq("id", text(existingPackage, ["id"]))
+              .eq("company_id", COMPANY_ID)
+              .eq("app_id", APP_ID)
+              .select("*"),
+          { throwOnError: true }
+        );
+        emit({
+          stage: "ETAPA 3 - PACKAGE_ENTRIES",
+          operation: "update",
+          payload: packageOperationPayload,
+          status: packageResult.status,
+          statusText: packageResult.statusText,
+          data: packageResult.data,
+          error: packageResult.error
+        });
+      } catch (error) {
+        emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "update", payload: packageOperationPayload, error: serializableError(error) });
+        throw error;
+      }
     } else {
-      await runSupabase(
-        "package_entries",
-        "insert",
-        { date: entry.date, ...packageDebugPayload(row, carriers) },
-        () => requireSupabase().from("package_entries").insert(row),
-        { throwOnError: true }
-      );
+      const packageOperationPayload = { date: entry.date, ...packageDebugPayload(row, carriers) };
+      emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "insert", payload: packageOperationPayload });
+      try {
+        const packageResult = await runSupabase(
+          "package_entries",
+          "insert",
+          packageOperationPayload,
+          () => requireSupabase().from("package_entries").insert(row).select("*"),
+          { throwOnError: true }
+        );
+        emit({
+          stage: "ETAPA 3 - PACKAGE_ENTRIES",
+          operation: "insert",
+          payload: packageOperationPayload,
+          status: packageResult.status,
+          statusText: packageResult.statusText,
+          data: packageResult.data,
+          error: packageResult.error
+        });
+      } catch (error) {
+        emit({ stage: "ETAPA 3 - PACKAGE_ENTRIES", operation: "insert", payload: packageOperationPayload, error: serializableError(error) });
+        throw error;
+      }
     }
 
     const confirmedResult = await runSupabase<DbRow[]>(
@@ -666,6 +727,25 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
         }.`
       );
     }
+    emit({
+      stage: "ETAPA 4 - CONFIRMACAO",
+      operation: "select",
+      payload: { date: entry.date, daily_entry_id: dailyId, carrier_id: row.carrier_id, app_id: APP_ID, company_id: COMPANY_ID },
+      status: confirmedResult.status,
+      statusText: confirmedResult.statusText,
+      data: confirmedResult.data,
+      records: ((confirmedResult.data || []) as DbRow[]).map((item) => ({
+        id: text(item, ["id"]),
+        date: entry.date,
+        carrier_id: text(item, ["carrier_id", "transportadora_id"]),
+        carrier_name: packageDebugPayload(row, carriers).carrier_name,
+        ml: num(item, ["ml", "mercado_livre", "ml_count", "quantidade_ml"]),
+        shopee: num(item, ["shopee", "shopee_count", "quantidade_shopee"]),
+        avulso: num(item, ["avulso", "avulso_count", "quantidade_avulso"]),
+        app_id: text(item, ["app_id"]),
+        company_id: text(item, ["company_id", "id_da_empresa"])
+      }))
+    });
   }
 
   const stalePackages = existingPackages.filter((row) => {

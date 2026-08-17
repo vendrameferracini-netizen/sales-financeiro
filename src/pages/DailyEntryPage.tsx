@@ -5,7 +5,7 @@ import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
 import { useFinance } from "../contexts/FinanceContext";
 import { APP_ID, COMPANY_ID } from "../data/app";
-import { Carrier, DailyCarrierInput } from "../types";
+import { Carrier, DailyCarrierInput, SaveDebugStep } from "../types";
 import { addDays, formatDate, todayISO } from "../utils/dates";
 import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
 import { currency } from "../utils/format";
@@ -25,6 +25,7 @@ export const DailyEntryPage = () => {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [debugSteps, setDebugSteps] = useState<SaveDebugStep[]>([]);
 
   useEffect(() => {
     const entry = getEntry(date);
@@ -35,11 +36,8 @@ export const DailyEntryPage = () => {
     setDraft(next);
     setSaved(false);
     setSaveError("");
+    setDebugSteps([]);
   }, [activeCarriers, date, getEntry]);
-
-  const dailyReport = useMemo(() => {
-    return buildDailyFullValueReport(getEntry(date)?.carriers || {}, carriers);
-  }, [carriers, date, getEntry]);
 
   const hasPendingDraft = useMemo(() => {
     const savedInputs = getEntry(date)?.carriers || {};
@@ -49,6 +47,10 @@ export const DailyEntryPage = () => {
       return draftInput.ml !== savedInput.ml || draftInput.shopee !== savedInput.shopee || draftInput.avulso !== savedInput.avulso;
     });
   }, [activeCarriers, date, draft, getEntry]);
+
+  const dailyReport = useMemo(() => {
+    return buildDailyFullValueReport(hasPendingDraft ? draft : getEntry(date)?.carriers || {}, carriers);
+  }, [carriers, date, draft, getEntry, hasPendingDraft]);
 
   const updateField = (carrierId: string, field: keyof DailyCarrierInput, value: string) => {
     const parsed = Math.max(0, Number.parseInt(value || "0", 10) || 0);
@@ -74,11 +76,14 @@ export const DailyEntryPage = () => {
       ...normalizeCarrierInput(draft[carrier.id])
     }));
     console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
+    setDebugSteps([{ stage: "ETAPA 1 - INICIO_SAVE", payload }]);
     setSaving(true);
     setSaved(false);
     setSaveError("");
     try {
-      await saveEntry(date, draft);
+      await saveEntry(date, draft, (step) => {
+        setDebugSteps((current) => [...current, step]);
+      });
       setSaved(true);
       console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID });
     } catch (error) {
@@ -135,6 +140,18 @@ export const DailyEntryPage = () => {
         <pre className="status-panel error-details">
           {saveError}
         </pre>
+      )}
+
+      {debugSteps.length > 0 && (
+        <section className="status-panel technical-panel">
+          <h2>Diagnostico tecnico do salvamento</h2>
+          {debugSteps.map((step, index) => (
+            <article key={`${step.stage}-${index}`}>
+              <strong>{step.stage}</strong>
+              <pre>{JSON.stringify(step, null, 2)}</pre>
+            </article>
+          ))}
+        </section>
       )}
 
       <ResponsiveTable

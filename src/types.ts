@@ -14,6 +14,17 @@ export type DailyEntry = {
   carriers: Record<string, DailyCarrierInput>;
 };
 
+export type SaveDebugStep = {
+  stage: string;
+  operation?: string;
+  payload?: unknown;
+  status?: number;
+  statusText?: string;
+  data?: unknown;
+  error?: unknown;
+  records?: unknown;
+};
+
 export type FixedCost = {
   id: string;
   description: string;

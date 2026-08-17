@@ -1,5 +1,5 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
-import { Carrier, DailyCarrierInput, DailyEntry, FixedCost } from "../types";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { Carrier, DailyCarrierInput, DailyEntry, FixedCost, SaveDebugStep } from "../types";
 import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
@@ -9,7 +9,7 @@ type FinanceContextValue = {
   loading: boolean;
   error: string;
   getEntry: (date: string) => DailyEntry | undefined;
-  saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => Promise<void>;
+  saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>, onDebugStep?: (step: SaveDebugStep) => void) => Promise<void>;
   addCarrier: (carrier: Omit<Carrier, "id">) => Promise<void>;
   updateCarrier: (carrier: Carrier) => Promise<void>;
   removeCarrier: (id: string) => Promise<void>;
@@ -56,6 +56,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  const getEntry = useCallback((date: string) => entries[date], [entries]);
+
   const value = useMemo<FinanceContextValue>(
     () => ({
       carriers,
@@ -63,8 +65,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
       fixedCosts,
       loading,
       error,
-      getEntry: (date) => entries[date],
-      saveEntry: (date, carrierInputs) => {
+      getEntry,
+      saveEntry: (date, carrierInputs, onDebugStep) => {
         const nextEntry = {
           date,
           carriers: {
@@ -72,7 +74,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             ...carrierInputs
           }
         };
-        return saveDailyEntry(nextEntry, carriers)
+        return saveDailyEntry(nextEntry, carriers, onDebugStep)
           .then((freshEntry) => {
             setEntries((current) => ({
               ...current,
@@ -147,7 +149,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           });
       }
     }),
-    [carriers, entries, fixedCosts, loading, error]
+    [carriers, entries, fixedCosts, getEntry, loading, error]
   );
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;
