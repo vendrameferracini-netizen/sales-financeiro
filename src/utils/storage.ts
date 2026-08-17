@@ -769,14 +769,13 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
       () => selectConfirmedPackageEntry(dailyId, String(row.carrier_id)),
       { throwOnError: true }
     );
-    const confirmedRow = ((confirmedResult.data || []) as DbRow[]).find(
-      (item) =>
-        text(item, ["carrier_id", "transportadora_id"]) === String(row.carrier_id) &&
-        num(item, ["ml", "mercado_livre", "ml_count", "quantidade_ml"]) === Number(row.ml) &&
-        num(item, ["shopee", "shopee_count", "quantidade_shopee"]) === Number(row.shopee) &&
-        num(item, ["avulso", "avulso_count", "quantidade_avulso"]) === Number(row.avulso)
-    );
-    if (!confirmedRow) {
+    const confirmedRow = latestPackageForCarrier((confirmedResult.data || []) as DbRow[], String(row.carrier_id));
+    const confirmedMatches =
+      confirmedRow &&
+      num(confirmedRow, ["ml", "mercado_livre", "ml_count", "quantidade_ml"]) === Number(row.ml) &&
+      num(confirmedRow, ["shopee", "shopee_count", "quantidade_shopee"]) === Number(row.shopee) &&
+      num(confirmedRow, ["avulso", "avulso_count", "quantidade_avulso"]) === Number(row.avulso);
+    if (!confirmedMatches) {
       throw new Error(
         `Erro: o Supabase nao confirmou a persistencia do lancamento. Data: ${entry.date}. Transportadora: ${
           packageDebugPayload(row, carriers).carrier_name

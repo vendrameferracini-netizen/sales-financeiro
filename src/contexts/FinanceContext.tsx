@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost, SaveDebugStep } from "../types";
 import { normalizeEntryDate } from "../utils/dates";
 import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
@@ -32,14 +32,16 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const entriesRequestRef = useRef(0);
 
   useEffect(() => {
     let active = true;
+    const loadRequest = entriesRequestRef.current;
     loadFinanceData()
       .then((snapshot) => {
         if (!active) return;
         setCarriers(sortCarriersByName(snapshot.carriers));
-        setEntries(snapshot.entries);
+        if (loadRequest === entriesRequestRef.current) setEntries(snapshot.entries);
         setFixedCosts(snapshot.fixedCosts);
         setError("");
       })
@@ -69,6 +71,8 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
       getEntry,
       saveEntry: (date, carrierInputs, onDebugStep) => {
         const normalizedDate = normalizeEntryDate(date);
+        const saveRequest = entriesRequestRef.current + 1;
+        entriesRequestRef.current = saveRequest;
         const nextEntry = {
           date: normalizedDate,
           carriers: {
@@ -78,6 +82,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
         };
         return saveDailyEntry(nextEntry, carriers, onDebugStep)
           .then((freshEntry) => {
+            if (saveRequest !== entriesRequestRef.current) return;
             setEntries((current) => ({
               ...current,
               [normalizedDate]: freshEntry || nextEntry
