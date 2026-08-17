@@ -69,6 +69,11 @@ const logSupabaseError = (table: string, operation: string, payload: unknown, er
   console.error({ table, operation, payload, error });
 };
 
+const logSupabaseSuccess = <T,>(table: string, operation: string, payload: unknown, data: T | null) => {
+  const rowCount = Array.isArray(data) ? data.length : data ? 1 : 0;
+  console.log("Resposta do Supabase", { table, operation, payload, rowCount, data });
+};
+
 const runSupabase = async <T,>(
   table: string,
   operation: string,
@@ -81,6 +86,8 @@ const runSupabase = async <T,>(
     if (result.error) {
       logSupabaseError(table, operation, payload, result.error);
       if (options.throwOnError) throw new SupabaseOperationError(table, operation, payload, result.error);
+    } else {
+      logSupabaseSuccess(table, operation, payload, result.data);
     }
     return result;
   } catch (error) {
@@ -223,6 +230,11 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
   updated_at: new Date().toISOString()
 });
 
+const packageDebugPayload = (row: ReturnType<typeof packageRow>, carriers: Carrier[] = []) => ({
+  ...row,
+  carrier_name: carriers.find((carrier) => carrier.id === row.carrier_id)?.name || "Transportadora nao encontrada"
+});
+
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID);
 
 const selectDailyEntryByDate = (date: string) =>
@@ -230,6 +242,39 @@ const selectDailyEntryByDate = (date: string) =>
 
 const selectPackageEntriesByDailyId = (dailyEntryId: string) =>
   requireSupabase().from("package_entries").select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID).eq("daily_entry_id", dailyEntryId);
+
+const debugReadEntryDate = async (date: string, phase: string) => {
+  const dailyResult = await runSupabase<DbRow[]>(
+    "daily_entries",
+    `debug_${phase}_by_exact_date`,
+    { app_id: APP_ID, company_id: COMPANY_ID, date },
+    () => selectDailyEntryByDate(date)
+  );
+  const dailyRows = ((dailyResult.data || []) as DbRow[]).filter((row) => companyMatches(row, salesCompany));
+  const dailyIds = dailyRows.map((row) => text(row, ["id"])).filter(Boolean);
+  const packageResults = await Promise.all(
+    dailyIds.map((dailyEntryId) =>
+      runSupabase<DbRow[]>(
+        "package_entries",
+        `debug_${phase}_by_daily_entry_id`,
+        { app_id: APP_ID, company_id: COMPANY_ID, date, daily_entry_id: dailyEntryId },
+        () => selectPackageEntriesByDailyId(dailyEntryId)
+      )
+    )
+  );
+  const packageRows = packageResults.flatMap((result) => ((result.data || []) as DbRow[]).filter((row) => companyMatches(row, salesCompany)));
+
+  console.log("Diagnostico persistencia lancamento diario", {
+    phase,
+    date,
+    app_id: APP_ID,
+    company_id: COMPANY_ID,
+    daily_entries_count: dailyRows.length,
+    package_entries_count: packageRows.length,
+    daily_entries: dailyRows,
+    package_entries: packageRows
+  });
+};
 
 const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
   Object.fromEntries(Object.entries(payload).filter(([key]) => columns.includes(key) && payload[key] !== undefined));
@@ -363,6 +408,7 @@ export const loadFinanceData = async (): Promise<FinanceSnapshot> => {
     const company = salesCompany;
     const carriers = await loadCarriers(company);
     const [entries, fixedCosts] = await Promise.all([loadEntries(company), loadFixedCosts(company), auditSupportingTables()]);
+    await Promise.all(["2026-08-13", "2026-08-14", "2026-08-15"].map((date) => debugReadEntryDate(date, "app_load")));
 
     console.log("Dados carregados do Supabase", {
       schema: "companies/carriers/daily_entries/package_entries/fixed_costs/costs",
@@ -440,7 +486,7 @@ export const deleteCarrier = async (id: string) => {
   return !result.error;
 };
 
-export const saveDailyEntry = async (entry: DailyEntry) => {
+export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []) => {
   const company = salesCompany;
   const dailyPayload = {
     ...rowCompanyPayload(),
@@ -448,6 +494,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
     updated_at: new Date().toISOString()
   };
 
+  await debugReadEntryDate(entry.date, "before_save");
   console.log("Salvando no Supabase", { table: "daily_entries", operation: "save", payload: dailyPayload });
   const existingResult = await runSupabase<DbRow[]>(
     "daily_entries",
@@ -495,7 +542,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
     date: entry.date,
     daily_entry_id: dailyId,
     records: rows.length,
-    payload: rows
+    payload: rows.map((row) => packageDebugPayload(row, carriers))
   });
 
   const existingPackagesResult = await runSupabase<DbRow[]>(
@@ -535,7 +582,13 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
         { throwOnError: true }
       );
     } else {
-      await runSupabase("package_entries", "insert", { date: entry.date, ...row }, () => requireSupabase().from("package_entries").insert(row), { throwOnError: true });
+      await runSupabase(
+        "package_entries",
+        "insert",
+        { date: entry.date, ...packageDebugPayload(row, carriers) },
+        () => requireSupabase().from("package_entries").insert(row),
+        { throwOnError: true }
+      );
     }
   }
 
@@ -555,6 +608,7 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
   }
 
   const freshEntry = await loadEntryByDate(entry.date);
+  await debugReadEntryDate(entry.date, "after_save");
   if (!freshEntry) throw new Error(`Lancamento de ${entry.date} nao foi encontrado no Supabase apos salvar.`);
   return freshEntry;
 };

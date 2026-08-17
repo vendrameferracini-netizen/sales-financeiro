@@ -72,7 +72,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             ...carrierInputs
           }
         };
-        return saveDailyEntry(nextEntry)
+        return saveDailyEntry(nextEntry, carriers)
           .then((freshEntry) => {
             setEntries((current) => ({
               ...current,
@@ -83,6 +83,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           .catch((saveError) => {
             console.error("Erro completo ao salvar lancamento no Supabase", saveError);
             setError(errorText(saveError));
+            throw saveError;
           });
       },
       addCarrier: (carrier) => {
