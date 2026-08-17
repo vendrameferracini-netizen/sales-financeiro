@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost, SaveDebugStep } from "../types";
+import { normalizeEntryDate } from "../utils/dates";
 import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
@@ -56,7 +57,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  const getEntry = useCallback((date: string) => entries[date], [entries]);
+  const getEntry = useCallback((date: string) => entries[normalizeEntryDate(date)], [entries]);
 
   const value = useMemo<FinanceContextValue>(
     () => ({
@@ -67,10 +68,11 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
       error,
       getEntry,
       saveEntry: (date, carrierInputs, onDebugStep) => {
+        const normalizedDate = normalizeEntryDate(date);
         const nextEntry = {
-          date,
+          date: normalizedDate,
           carriers: {
-            ...(entries[date]?.carriers || {}),
+            ...(entries[normalizedDate]?.carriers || {}),
             ...carrierInputs
           }
         };
@@ -78,7 +80,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           .then((freshEntry) => {
             setEntries((current) => ({
               ...current,
-              [date]: freshEntry || nextEntry
+              [normalizedDate]: freshEntry || nextEntry
             }));
             setError("");
           })

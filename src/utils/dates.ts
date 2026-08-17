@@ -5,6 +5,14 @@ export const toISODate = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+export const normalizeEntryDate = (input: unknown) => {
+  if (input instanceof Date) return toISODate(input);
+  const value = String(input || "").trim();
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  return "";
+};
+
 export const todayISO = () => toISODate(new Date());
 
 export const addDays = (iso: string, days: number) => {
