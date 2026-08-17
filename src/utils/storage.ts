@@ -13,6 +13,8 @@ type FinanceSnapshot = {
 type SupabaseResult<T> = {
   data: T | null;
   error: unknown;
+  status?: number;
+  statusText?: string;
 };
 
 const errorDetails = (error: unknown) => error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
@@ -60,6 +62,25 @@ class SupabaseOperationError extends Error {
   }
 }
 
+export const formatErrorForScreen = (error: unknown) => {
+  if (error instanceof SupabaseOperationError) {
+    const details = errorDetails(error.details);
+    return [
+      `Erro ao salvar ${error.table}:`,
+      `operation: ${error.operation}`,
+      details.code ? `code: ${String(details.code)}` : "",
+      details.message ? `message: ${String(details.message)}` : error.message,
+      details.details ? `details: ${String(details.details)}` : "",
+      details.hint ? `hint: ${String(details.hint)}` : "",
+      `payload: ${JSON.stringify(error.payload, null, 2)}`
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (error instanceof Error) return error.message;
+  return String(error || "Erro desconhecido ao salvar.");
+};
+
 export const sortCarriersByName = (carriers: Carrier[] = []) =>
   [...(carriers || [])].sort((first, second) => first.name.localeCompare(second.name, "pt-BR", { sensitivity: "base" }));
 
@@ -94,6 +115,13 @@ const runSupabase = async <T,>(
 ) => {
   try {
     const result = await request();
+    console.log("STATUS_SUPABASE", {
+      table,
+      operation,
+      payload,
+      status: result.status,
+      statusText: result.statusText
+    });
     if (result.error) {
       logSupabaseError(table, operation, payload, result.error);
       if (table === "daily_entries") logNamedSupabaseError("ERRO_DAILY_ENTRIES", result.error);
@@ -259,6 +287,15 @@ const selectDailyEntryByDate = (date: string) =>
 
 const selectPackageEntriesByDailyId = (dailyEntryId: string) =>
   requireSupabase().from("package_entries").select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID).eq("daily_entry_id", dailyEntryId);
+
+const selectConfirmedPackageEntry = (dailyEntryId: string, carrierId: string) =>
+  requireSupabase()
+    .from("package_entries")
+    .select("*")
+    .eq("company_id", COMPANY_ID)
+    .eq("app_id", APP_ID)
+    .eq("daily_entry_id", dailyEntryId)
+    .eq("carrier_id", carrierId);
 
 const debugReadEntryDate = async (date: string, phase: string) => {
   const dailyResult = await runSupabase<DbRow[]>(
@@ -605,6 +642,28 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
         { date: entry.date, ...packageDebugPayload(row, carriers) },
         () => requireSupabase().from("package_entries").insert(row),
         { throwOnError: true }
+      );
+    }
+
+    const confirmedResult = await runSupabase<DbRow[]>(
+      "package_entries",
+      "confirm_by_daily_entry_and_carrier",
+      { date: entry.date, daily_entry_id: dailyId, carrier_id: row.carrier_id, app_id: APP_ID, company_id: COMPANY_ID },
+      () => selectConfirmedPackageEntry(dailyId, String(row.carrier_id)),
+      { throwOnError: true }
+    );
+    const confirmedRow = ((confirmedResult.data || []) as DbRow[]).find(
+      (item) =>
+        text(item, ["carrier_id", "transportadora_id"]) === String(row.carrier_id) &&
+        num(item, ["ml", "mercado_livre", "ml_count", "quantidade_ml"]) === Number(row.ml) &&
+        num(item, ["shopee", "shopee_count", "quantidade_shopee"]) === Number(row.shopee) &&
+        num(item, ["avulso", "avulso_count", "quantidade_avulso"]) === Number(row.avulso)
+    );
+    if (!confirmedRow) {
+      throw new Error(
+        `Erro: o Supabase nao confirmou a persistencia do lancamento. Data: ${entry.date}. Transportadora: ${
+          packageDebugPayload(row, carriers).carrier_name
+        }.`
       );
     }
   }

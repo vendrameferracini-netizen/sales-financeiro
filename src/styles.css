@@ -469,6 +469,32 @@ label input {
   color: #a30d15;
 }
 
+.status-panel {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  background: #fff;
+  color: #111;
+  font-weight: 900;
+}
+
+.status-panel.warning {
+  border-color: #e1b300;
+  background: #fff8d7;
+}
+
+.status-panel.error-details {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  border-color: #d90d1b;
+  background: #fff1f2;
+  color: #8a0610;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .table-wrap {
   margin-bottom: 20px;
   overflow: hidden;

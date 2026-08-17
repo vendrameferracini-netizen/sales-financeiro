@@ -9,6 +9,7 @@ import { Carrier, DailyCarrierInput } from "../types";
 import { addDays, formatDate, todayISO } from "../utils/dates";
 import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
 import { currency } from "../utils/format";
+import { formatErrorForScreen } from "../utils/storage";
 
 const buildBlankDraft = (carriers: Carrier[]) =>
   carriers.reduce<Record<string, DailyCarrierInput>>((acc, carrier) => {
@@ -33,12 +34,21 @@ export const DailyEntryPage = () => {
     });
     setDraft(next);
     setSaved(false);
+    setSaveError("");
   }, [activeCarriers, date, getEntry]);
 
   const dailyReport = useMemo(() => {
+    return buildDailyFullValueReport(getEntry(date)?.carriers || {}, carriers);
+  }, [carriers, date, getEntry]);
+
+  const hasPendingDraft = useMemo(() => {
     const savedInputs = getEntry(date)?.carriers || {};
-    return buildDailyFullValueReport({ ...savedInputs, ...draft }, carriers);
-  }, [carriers, date, draft, getEntry]);
+    return activeCarriers.some((carrier) => {
+      const draftInput = normalizeCarrierInput(draft[carrier.id]);
+      const savedInput = normalizeCarrierInput(savedInputs[carrier.id]);
+      return draftInput.ml !== savedInput.ml || draftInput.shopee !== savedInput.shopee || draftInput.avulso !== savedInput.avulso;
+    });
+  }, [activeCarriers, date, draft, getEntry]);
 
   const updateField = (carrierId: string, field: keyof DailyCarrierInput, value: string) => {
     const parsed = Math.max(0, Number.parseInt(value || "0", 10) || 0);
@@ -72,7 +82,7 @@ export const DailyEntryPage = () => {
       setSaved(true);
       console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao foi possivel salvar os dados no Supabase.";
+      const message = formatErrorForScreen(error);
       console.error("ERRO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
       setSaveError(message);
     } finally {
@@ -112,6 +122,20 @@ export const DailyEntryPage = () => {
           { label: "LogManager automatico", value: currency(dailyReport.totals.logManager), tone: "dark" }
         ]}
       />
+
+      {hasPendingDraft && (
+        <div className="status-panel warning">
+          Alteracoes digitadas ainda nao foram confirmadas no Supabase. Clique em Salvar Dados para persistir.
+        </div>
+      )}
+
+      {saving && <div className="status-panel">Salvando dados...</div>}
+
+      {saveError && (
+        <pre className="status-panel error-details">
+          {saveError}
+        </pre>
+      )}
 
       <ResponsiveTable
         columns={["Transportadora", "ML", "Shopee", "Avulso", "Total de pacotes", "Valor total", "LogManager"]}
@@ -185,8 +209,8 @@ export const DailyEntryPage = () => {
           <Save size={20} />
           {saving ? "Salvando..." : "Salvar Dados"}
         </button>
-        {saved && <span>Dados salvos para {formatDate(date)}.</span>}
-        {saveError && <span className="error-text">{saveError}</span>}
+        {saved && <span>Dados salvos com sucesso para {formatDate(date)}.</span>}
+        {saveError && <span className="error-text">Erro ao salvar. Veja os detalhes na tela.</span>}
       </div>
     </>
   );
