@@ -14,24 +14,15 @@ export type DailyEntry = {
   carriers: Record<string, DailyCarrierInput>;
 };
 
-export type SaveDebugStatus = "waiting" | "running" | "success" | "error" | "timeout";
-
-export type SaveDebugStage = "ETAPA 1 - INÍCIO" | "ETAPA 2 - DAILY_ENTRIES" | "ETAPA 3 - PACKAGE_ENTRIES" | "ETAPA 4 - CONFIRMAÇÃO";
-
 export type SaveDebugStep = {
-  stage: SaveDebugStage;
-  status: SaveDebugStatus;
-  label: string;
+  stage: string;
   operation?: string;
-  table?: string;
   payload?: unknown;
-  httpStatus?: number;
+  status?: number;
   statusText?: string;
   data?: unknown;
   error?: unknown;
   records?: unknown;
-  elapsedMs?: number;
-  timestamp: string;
 };
 
 export type FixedCost = {
