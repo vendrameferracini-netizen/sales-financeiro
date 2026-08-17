@@ -465,6 +465,10 @@ label input {
   font-weight: 900;
 }
 
+.error-text {
+  color: #a30d15;
+}
+
 .table-wrap {
   margin-bottom: 20px;
   overflow: hidden;

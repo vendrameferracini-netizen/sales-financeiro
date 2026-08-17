@@ -9,7 +9,7 @@ type FinanceContextValue = {
   loading: boolean;
   error: string;
   getEntry: (date: string) => DailyEntry | undefined;
-  saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => void;
+  saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>) => Promise<void>;
   addCarrier: (carrier: Omit<Carrier, "id">) => Promise<void>;
   updateCarrier: (carrier: Carrier) => Promise<void>;
   removeCarrier: (id: string) => Promise<void>;
@@ -72,11 +72,11 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             ...carrierInputs
           }
         };
-        saveDailyEntry(nextEntry)
-          .then(() => {
+        return saveDailyEntry(nextEntry)
+          .then((freshEntry) => {
             setEntries((current) => ({
               ...current,
-              [date]: nextEntry
+              [date]: freshEntry || nextEntry
             }));
             setError("");
           })

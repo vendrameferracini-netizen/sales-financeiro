@@ -73,7 +73,7 @@ const runSupabase = async <T,>(
   table: string,
   operation: string,
   payload: unknown,
-  request: () => Promise<SupabaseResult<T>>,
+  request: () => PromiseLike<SupabaseResult<T>>,
   options: { throwOnError?: boolean } = {}
 ) => {
   try {
@@ -225,6 +225,12 @@ const packageRow = (dailyEntryId: string, carrierId: string, input: DailyCarrier
 
 const selectRowsByCompany = (table: string) => requireSupabase().from(table).select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID);
 
+const selectDailyEntryByDate = (date: string) =>
+  requireSupabase().from("daily_entries").select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID).eq("date", date);
+
+const selectPackageEntriesByDailyId = (dailyEntryId: string) =>
+  requireSupabase().from("package_entries").select("*").eq("company_id", COMPANY_ID).eq("app_id", APP_ID).eq("daily_entry_id", dailyEntryId);
+
 const filterPayloadByColumns = (payload: DbRow, columns: string[]) =>
   Object.fromEntries(Object.entries(payload).filter(([key]) => columns.includes(key) && payload[key] !== undefined));
 
@@ -283,6 +289,48 @@ const loadEntries = async (company: DbRow) => {
       return [date, { date, carriers } satisfies DailyEntry];
     })
   );
+};
+
+const loadEntryByDate = async (date: string): Promise<DailyEntry | null> => {
+  const dailyResult = await runSupabase<DbRow[]>(
+    "daily_entries",
+    "select_after_save",
+    { app_id: APP_ID, company_id: COMPANY_ID, date },
+    () => selectDailyEntryByDate(date),
+    { throwOnError: true }
+  );
+  const dailyRows = ((dailyResult.data || []) as DbRow[]).filter((row) => companyMatches(row, salesCompany));
+  const dailyRow = dailyRows.find((row) => text(row, ["date", "data", "entry_date"]) === date);
+
+  if (!dailyRow) {
+    console.log("Dados carregados do Supabase", { table: "daily_entries", operation: "select_after_save", date, records: 0 });
+    return null;
+  }
+
+  const dailyId = text(dailyRow, ["id"]);
+  const packageResult = await runSupabase<DbRow[]>(
+    "package_entries",
+    "select_after_save",
+    { app_id: APP_ID, company_id: COMPANY_ID, daily_entry_id: dailyId, date },
+    () => selectPackageEntriesByDailyId(dailyId),
+    { throwOnError: true }
+  );
+  const packageRows = ((packageResult.data || []) as DbRow[]).filter((row) => companyMatches(row, salesCompany));
+  const carriers = packageRows.reduce<Record<string, DailyCarrierInput>>((acc, row) => {
+    const carrierId = text(row, ["carrier_id", "transportadora_id"]);
+    if (carrierId) acc[carrierId] = packageInputFromRow(row);
+    return acc;
+  }, {});
+
+  console.log("Dados carregados do Supabase", {
+    table: "package_entries",
+    operation: "select_after_save",
+    date,
+    daily_entry_id: dailyId,
+    records: packageRows.length
+  });
+
+  return { date, carriers };
 };
 
 const loadFixedCosts = async (company: DbRow) => {
@@ -400,36 +448,115 @@ export const saveDailyEntry = async (entry: DailyEntry) => {
     updated_at: new Date().toISOString()
   };
 
-  console.log("Salvando no Supabase", { table: "daily_entries", date: entry.date, app_id: APP_ID, company_id: COMPANY_ID });
-  const existingResult = await runSupabase<DbRow[]>("daily_entries", "select_before_save", { app_id: APP_ID, company_id: COMPANY_ID, date: entry.date }, () =>
-    selectRowsByCompany("daily_entries")
+  console.log("Salvando no Supabase", { table: "daily_entries", operation: "save", payload: dailyPayload });
+  const existingResult = await runSupabase<DbRow[]>(
+    "daily_entries",
+    "select_before_save",
+    { app_id: APP_ID, company_id: COMPANY_ID, date: entry.date },
+    () => selectDailyEntryByDate(entry.date),
+    { throwOnError: true }
   );
-  if (existingResult.error) return;
   const existing = ((existingResult.data || []) as DbRow[]).find((row) => companyMatches(row, company) && text(row, ["date", "data", "entry_date"]) === entry.date);
 
   const dailyResult = existing?.id
-    ? await runSupabase<DbRow>("daily_entries", "update", { id: text(existing, ["id"]), ...dailyPayload }, () =>
-        requireSupabase().from("daily_entries").update(dailyPayload).eq("id", text(existing, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID).select("*").maybeSingle()
+    ? await runSupabase<DbRow>(
+        "daily_entries",
+        "update",
+        { id: text(existing, ["id"]), ...dailyPayload },
+        () =>
+          requireSupabase()
+            .from("daily_entries")
+            .update(dailyPayload)
+            .eq("id", text(existing, ["id"]))
+            .eq("company_id", COMPANY_ID)
+            .eq("app_id", APP_ID)
+            .select("*")
+            .maybeSingle(),
+        { throwOnError: true }
       )
-    : await runSupabase<DbRow>("daily_entries", "insert", { id: "generated", ...dailyPayload }, () =>
-        requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle()
+    : await runSupabase<DbRow>(
+        "daily_entries",
+        "insert",
+        { id: "generated", ...dailyPayload },
+        () => requireSupabase().from("daily_entries").insert({ id: makeId(), ...dailyPayload }).select("*").maybeSingle(),
+        { throwOnError: true }
       );
 
-  if (dailyResult.error) return;
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
-
-  const deleteResult = await runSupabase("package_entries", "delete_by_daily_entry_id", { daily_entry_id: dailyId, app_id: APP_ID, company_id: COMPANY_ID }, () =>
-    requireSupabase().from("package_entries").delete().eq("daily_entry_id", dailyId).eq("company_id", COMPANY_ID).eq("app_id", APP_ID)
-  );
-  if (deleteResult.error) return;
 
   const rows = Object.entries(entry.carriers || {})
     .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
     .map(([carrierId, input]) => packageRow(dailyId, carrierId, input));
 
-  if (!rows.length) return;
-  await runSupabase("package_entries", "insert", rows, () => requireSupabase().from("package_entries").insert(rows));
+  console.log("Payload enviado ao Supabase", {
+    table: "package_entries",
+    operation: "replace_for_daily_entry",
+    date: entry.date,
+    daily_entry_id: dailyId,
+    records: rows.length,
+    payload: rows
+  });
+
+  const existingPackagesResult = await runSupabase<DbRow[]>(
+    "package_entries",
+    "select_before_replace",
+    { daily_entry_id: dailyId, app_id: APP_ID, company_id: COMPANY_ID, date: entry.date },
+    () => selectPackageEntriesByDailyId(dailyId),
+    { throwOnError: true }
+  );
+  const existingPackages = ((existingPackagesResult.data || []) as DbRow[]).filter((row) => companyMatches(row, company));
+  const desiredCarrierIds = new Set(rows.map((row) => String(row.carrier_id)));
+
+  for (const row of rows) {
+    const existingPackage = existingPackages.find((item) => text(item, ["carrier_id", "transportadora_id"]) === String(row.carrier_id));
+    const packagePayload = {
+      ...rowCompanyPayload(),
+      daily_entry_id: dailyId,
+      carrier_id: row.carrier_id,
+      ml: row.ml,
+      shopee: row.shopee,
+      avulso: row.avulso,
+      updated_at: row.updated_at
+    };
+
+    if (existingPackage?.id) {
+      await runSupabase(
+        "package_entries",
+        "update",
+        { id: text(existingPackage, ["id"]), date: entry.date, ...packagePayload },
+        () =>
+          requireSupabase()
+            .from("package_entries")
+            .update(packagePayload)
+            .eq("id", text(existingPackage, ["id"]))
+            .eq("company_id", COMPANY_ID)
+            .eq("app_id", APP_ID),
+        { throwOnError: true }
+      );
+    } else {
+      await runSupabase("package_entries", "insert", { date: entry.date, ...row }, () => requireSupabase().from("package_entries").insert(row), { throwOnError: true });
+    }
+  }
+
+  const stalePackages = existingPackages.filter((row) => {
+    const carrierId = text(row, ["carrier_id", "transportadora_id"]);
+    return carrierId && !desiredCarrierIds.has(carrierId);
+  });
+
+  for (const stalePackage of stalePackages) {
+    await runSupabase(
+      "package_entries",
+      "delete_stale_for_daily_entry",
+      { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, date: entry.date, app_id: APP_ID, company_id: COMPANY_ID },
+      () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
+      { throwOnError: true }
+    );
+  }
+
+  const freshEntry = await loadEntryByDate(entry.date);
+  if (!freshEntry) throw new Error(`Lancamento de ${entry.date} nao foi encontrado no Supabase apos salvar.`);
+  return freshEntry;
 };
 
 export const saveFixedCost = async (cost: Omit<FixedCost, "id"> | FixedCost) => {

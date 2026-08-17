@@ -21,6 +21,8 @@ export const DailyEntryPage = () => {
   const [date, setDate] = useState(todayISO());
   const [draft, setDraft] = useState<Record<string, DailyCarrierInput>>(() => buildBlankDraft(activeCarriers));
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     const entry = getEntry(date);
@@ -48,6 +50,22 @@ export const DailyEntryPage = () => {
       }
     }));
     setSaved(false);
+    setSaveError("");
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    setSaveError("");
+    try {
+      await saveEntry(date, draft);
+      setSaved(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel salvar os dados no Supabase.";
+      setSaveError(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -149,15 +167,14 @@ export const DailyEntryPage = () => {
       <div className="save-bar">
         <button
           className="primary-button"
-          onClick={() => {
-            saveEntry(date, draft);
-            setSaved(true);
-          }}
+          onClick={handleSave}
+          disabled={saving}
         >
           <Save size={20} />
-          Salvar Dados
+          {saving ? "Salvando..." : "Salvar Dados"}
         </button>
         {saved && <span>Dados salvos para {formatDate(date)}.</span>}
+        {saveError && <span className="error-text">{saveError}</span>}
       </div>
     </>
   );
