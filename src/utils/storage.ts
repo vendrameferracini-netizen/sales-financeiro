@@ -593,7 +593,6 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     stage: "ETAPA 1 - INICIO_SAVE",
     payload: { input_date: entry.date, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID, carriers: normalizedEntry.carriers }
   });
-  await debugReadEntryDate(normalizedDate, "before_save");
   console.log("TENTANDO_SALVAR_DAILY_ENTRIES", { table: "daily_entries", operation: "save", payload: dailyPayload });
   const existingResult = await runSupabase<DbRow[]>(
     "daily_entries",
@@ -802,7 +801,6 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   }
 
   const freshEntry = await loadEntryByDate(normalizedDate);
-  await debugReadEntryDate(normalizedDate, "after_save");
   if (!freshEntry) throw new Error(`Lancamento de ${normalizedDate} nao foi encontrado no Supabase apos salvar.`);
   const expectedRows = rows.filter((row) => (Number(row.ml) || 0) + (Number(row.shopee) || 0) + (Number(row.avulso) || 0) > 0);
   const confirmedRows = expectedRows.filter((row) => {
