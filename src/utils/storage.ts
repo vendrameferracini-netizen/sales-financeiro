@@ -967,7 +967,6 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
       )
   );
   const existingPackages = ((existingPackagesResult.data || []) as DbRow[]).filter((row) => companyMatches(row, company));
-  const desiredCarrierIds = new Set(rows.map((row) => String(row.carrier_id)));
 
   for (const row of rows) {
     const existingPackage = latestPackageForCarrier(existingPackages, String(row.carrier_id));
@@ -1102,34 +1101,19 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     });
   }
 
-  const stalePackages = existingPackages.filter((row) => {
-    const carrierId = text(row, ["carrier_id", "transportadora_id"]);
-    return carrierId && !desiredCarrierIds.has(carrierId);
+  emit({
+    stage: "ETAPA 5.3 - DELETE_STALE_NAO_EXECUTADO",
+    operation: "preservar_historico",
+    table: "package_entries",
+    date: normalizedDate,
+    id: dailyId,
+    payload: {
+      motivo: "O salvamento atual nao apaga package_entries antigos nem duplicidades historicas.",
+      app_id: APP_ID,
+      company_id: COMPANY_ID,
+      daily_entry_id: dailyId
+    }
   });
-
-  for (const stalePackage of stalePackages) {
-    const stalePayload = { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID };
-    await runSaveDiagnosticStep(
-      emit,
-      {
-        beforeStage: "ETAPA 5.3 - ANTES_REMOVER_PACKAGE_ANTIGO",
-        afterStage: "ETAPA 5.4 - DEPOIS_REMOVER_PACKAGE_ANTIGO",
-        table: "package_entries",
-        operation: "delete_stale_for_daily_entry",
-        date: normalizedDate,
-        id: text(stalePackage, ["id"]),
-        payload: stalePayload
-      },
-      () =>
-        runSupabase(
-          "package_entries",
-          "delete_stale_for_daily_entry",
-          stalePayload,
-          () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
-          { throwOnError: true }
-        )
-    );
-  }
 
   const freshEntry = await runTimedDiagnosticStep(
     emit,
