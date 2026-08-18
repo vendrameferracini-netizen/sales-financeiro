@@ -5,18 +5,14 @@ import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
 import { useFinance } from "../contexts/FinanceContext";
 import { APP_ID, COMPANY_ID } from "../data/app";
-import { Carrier, DailyCarrierInput, SaveDebugStep } from "../types";
+import { Carrier, DailyCarrierInput } from "../types";
 import { addDays, formatDate, todayISO } from "../utils/dates";
 import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
 import { currency } from "../utils/format";
-import { formatErrorForScreen } from "../utils/storage";
 
 const SAVE_UI_TIMEOUT_MS = 20000;
 
-const serializeSaveError = (error: unknown) => {
-  if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack };
-  return error;
-};
+const friendlyError = (error: unknown) => (error instanceof Error ? error.message : "Erro ao salvar dados. Tente novamente.");
 
 const buildBlankDraft = (carriers: Carrier[]) =>
   carriers.reduce<Record<string, DailyCarrierInput>>((acc, carrier) => {
@@ -32,7 +28,6 @@ export const DailyEntryPage = () => {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [debugSteps, setDebugSteps] = useState<SaveDebugStep[]>([]);
   const savingRef = useRef(false);
   const selectedEntry = getEntry(date);
 
@@ -44,16 +39,14 @@ export const DailyEntryPage = () => {
     setDraft(next);
     setSaved(false);
     setSaveError("");
-    setDebugSteps([]);
   }, [activeCarriers, date, selectedEntry]);
 
   useEffect(() => {
     let active = true;
     refreshEntry(date).catch((error) => {
       if (!active) return;
-      const message = formatErrorForScreen(error);
       console.error("ERRO_CARREGAR_DATA", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
-      setSaveError(message);
+      setSaveError(friendlyError(error));
     });
     return () => {
       active = false;
@@ -89,42 +82,18 @@ export const DailyEntryPage = () => {
 
   const handleSave = async () => {
     if (savingRef.current) {
-      setDebugSteps((current) => [
-        ...current,
-        {
-          stage: "ETAPA 0 - SAVE_IGNORADO",
-          operation: "handleSave",
-          payload: { motivo: "Ja existe um salvamento em andamento.", date, app_id: APP_ID, company_id: COMPANY_ID }
-        }
-      ]);
       return;
     }
-
-    const payload = activeCarriers
-      .map((carrier) => ({
-        date,
-        app_id: APP_ID,
-        company_id: COMPANY_ID,
-        carrier_id: carrier.id,
-        transportadora: carrier.name,
-        ...normalizeCarrierInput(draft[carrier.id])
-      }))
-      .filter((item) => item.ml > 0 || item.shopee > 0 || item.avulso > 0);
-    console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
     const saveStartedAt = Date.now();
     savingRef.current = true;
-    setDebugSteps([{ stage: "ETAPA 0 - CLIQUE_SALVAR", operation: "handleSave", date, payload, timeoutMs: SAVE_UI_TIMEOUT_MS }]);
     setSaving(true);
     setSaved(false);
     setSaveError("");
     try {
-      setDebugSteps((current) => [...current, { stage: "ETAPA 0.1 - ANTES_SAVE_ENTRY", operation: "saveEntry", date, payload, timeoutMs: SAVE_UI_TIMEOUT_MS }]);
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          saveEntry(date, draft, (step) => {
-            setDebugSteps((current) => [...current, step]);
-          }),
+          saveEntry(date, draft),
           new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
               reject(new Error(`Timeout no handleSave: saveEntry nao retornou em ${SAVE_UI_TIMEOUT_MS}ms para ${date}.`));
@@ -134,28 +103,11 @@ export const DailyEntryPage = () => {
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
       }
-      setDebugSteps((current) => [
-        ...current,
-        { stage: "ETAPA 0.2 - DEPOIS_SAVE_ENTRY", operation: "saveEntry", date, payload, elapsedMs: Date.now() - saveStartedAt, timeoutMs: SAVE_UI_TIMEOUT_MS }
-      ]);
       setSaved(true);
-      console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID });
+      console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID, elapsedMs: Date.now() - saveStartedAt });
     } catch (error) {
-      const message = formatErrorForScreen(error);
       console.error("ERRO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
-      setDebugSteps((current) => [
-        ...current,
-        {
-          stage: "ETAPA 0.2 - DEPOIS_SAVE_ENTRY - ERRO",
-          operation: "saveEntry",
-          date,
-          payload,
-          error: serializeSaveError(error),
-          elapsedMs: Date.now() - saveStartedAt,
-          timeoutMs: SAVE_UI_TIMEOUT_MS
-        }
-      ]);
-      setSaveError(message);
+      setSaveError(friendlyError(error));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -207,18 +159,6 @@ export const DailyEntryPage = () => {
         <pre className="status-panel error-details">
           {saveError}
         </pre>
-      )}
-
-      {debugSteps.length > 0 && (
-        <section className="status-panel technical-panel">
-          <h2>Diagnostico tecnico do salvamento</h2>
-          {debugSteps.map((step, index) => (
-            <article key={`${step.stage}-${index}`}>
-              <strong>{step.stage}</strong>
-              <pre>{JSON.stringify(step, null, 2)}</pre>
-            </article>
-          ))}
-        </section>
       )}
 
       <ResponsiveTable
