@@ -17,12 +17,17 @@ export type DailyEntry = {
 export type SaveDebugStep = {
   stage: string;
   operation?: string;
+  table?: string;
+  date?: string;
+  id?: string;
   payload?: unknown;
   status?: number;
   statusText?: string;
   data?: unknown;
   error?: unknown;
   records?: unknown;
+  elapsedMs?: number;
+  timeoutMs?: number;
 };
 
 export type FixedCost = {

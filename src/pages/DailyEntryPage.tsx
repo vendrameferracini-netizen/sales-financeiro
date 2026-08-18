@@ -67,14 +67,16 @@ export const DailyEntryPage = () => {
   };
 
   const handleSave = async () => {
-    const payload = activeCarriers.map((carrier) => ({
-      date,
-      app_id: APP_ID,
-      company_id: COMPANY_ID,
-      carrier_id: carrier.id,
-      transportadora: carrier.name,
-      ...normalizeCarrierInput(draft[carrier.id])
-    }));
+    const payload = activeCarriers
+      .map((carrier) => ({
+        date,
+        app_id: APP_ID,
+        company_id: COMPANY_ID,
+        carrier_id: carrier.id,
+        transportadora: carrier.name,
+        ...normalizeCarrierInput(draft[carrier.id])
+      }))
+      .filter((item) => item.ml > 0 || item.shopee > 0 || item.avulso > 0);
     console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
     setDebugSteps([{ stage: "ETAPA 1 - INICIO_SAVE", payload }]);
     setSaving(true);
