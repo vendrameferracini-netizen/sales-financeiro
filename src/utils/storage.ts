@@ -796,6 +796,9 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
 
   emit({
     stage: "ETAPA 1 - INICIO_SAVE",
+    operation: "saveDailyEntry",
+    table: "daily_entries/package_entries",
+    date: normalizedDate,
     payload: {
       input_date: entry.date,
       normalized_date: normalizedDate,
@@ -808,8 +811,43 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
       )
     }
   });
+  emit({
+    stage: "ETAPA 1.0 - APOS_EMIT_INICIO_SAVE",
+    operation: "saveDailyEntry",
+    table: "daily_entries/package_entries",
+    date: normalizedDate,
+    payload: { input_date: entry.date, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID }
+  });
+  emit({
+    stage: "ETAPA 1.0.1 - ANTES_LOG_DAILY",
+    operation: "console.log",
+    table: "daily_entries",
+    date: normalizedDate,
+    payload: dailyPayload
+  });
   console.log("TENTANDO_SALVAR_DAILY_ENTRIES", { table: "daily_entries", operation: "save", payload: dailyPayload });
+  emit({
+    stage: "ETAPA 1.0.2 - DEPOIS_LOG_DAILY",
+    operation: "console.log",
+    table: "daily_entries",
+    date: normalizedDate,
+    payload: dailyPayload
+  });
   const existingDailyPayload = { app_id: APP_ID, company_id: COMPANY_ID, input_date: entry.date, normalized_date: normalizedDate };
+  emit({
+    stage: "ETAPA 1.0.3 - PAYLOAD_BUSCA_DAILY_PRONTO",
+    operation: "montar_payload",
+    table: "daily_entries",
+    date: normalizedDate,
+    payload: existingDailyPayload
+  });
+  emit({
+    stage: "ETAPA 1.0.4 - ANTES_WRAPPER_BUSCAR_DAILY",
+    operation: "runSaveDiagnosticStep",
+    table: "daily_entries",
+    date: normalizedDate,
+    payload: existingDailyPayload
+  });
   const existingResult = await runSaveDiagnosticStep<DbRow[]>(
     emit,
     {
@@ -1071,26 +1109,14 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
 
   for (const stalePackage of stalePackages) {
     const stalePayload = { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID };
-    await runSaveDiagnosticStep(
-      emit,
-      {
-        beforeStage: "ETAPA 5.3 - ANTES_REMOVER_PACKAGE_ANTIGO",
-        afterStage: "ETAPA 5.4 - DEPOIS_REMOVER_PACKAGE_ANTIGO",
-        table: "package_entries",
-        operation: "delete_stale_for_daily_entry",
-        date: normalizedDate,
-        id: text(stalePackage, ["id"]),
-        payload: stalePayload
-      },
-      () =>
-        runSupabase(
-          "package_entries",
-          "delete_stale_for_daily_entry",
-          stalePayload,
-          () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
-          { throwOnError: true }
-        )
-    );
+    emit({
+      stage: "ETAPA 5.3 - PACKAGE_ANTIGO_PRESERVADO",
+      table: "package_entries",
+      operation: "delete_stale_for_daily_entry_skipped",
+      date: normalizedDate,
+      id: text(stalePackage, ["id"]),
+      payload: stalePayload
+    });
   }
 
   const freshEntry = await runTimedDiagnosticStep(

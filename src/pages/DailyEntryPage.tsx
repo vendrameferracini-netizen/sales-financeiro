@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Save } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { ResponsiveTable } from "../components/ResponsiveTable";
 import { SummaryCards } from "../components/SummaryCards";
@@ -10,6 +10,13 @@ import { addDays, formatDate, todayISO } from "../utils/dates";
 import { blankCarrierInput, buildDailyFullValueReport, getCarrierDailyValue, getPackageTotal, normalizeCarrierInput } from "../utils/calculations";
 import { currency } from "../utils/format";
 import { formatErrorForScreen } from "../utils/storage";
+
+const SAVE_UI_TIMEOUT_MS = 20000;
+
+const serializeSaveError = (error: unknown) => {
+  if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack };
+  return error;
+};
 
 const buildBlankDraft = (carriers: Carrier[]) =>
   carriers.reduce<Record<string, DailyCarrierInput>>((acc, carrier) => {
@@ -26,6 +33,7 @@ export const DailyEntryPage = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [debugSteps, setDebugSteps] = useState<SaveDebugStep[]>([]);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     const entry = getEntry(date);
@@ -67,6 +75,18 @@ export const DailyEntryPage = () => {
   };
 
   const handleSave = async () => {
+    if (savingRef.current) {
+      setDebugSteps((current) => [
+        ...current,
+        {
+          stage: "ETAPA 0 - SAVE_IGNORADO",
+          operation: "handleSave",
+          payload: { motivo: "Ja existe um salvamento em andamento.", date, app_id: APP_ID, company_id: COMPANY_ID }
+        }
+      ]);
+      return;
+    }
+
     const payload = activeCarriers
       .map((carrier) => ({
         date,
@@ -78,21 +98,53 @@ export const DailyEntryPage = () => {
       }))
       .filter((item) => item.ml > 0 || item.shopee > 0 || item.avulso > 0);
     console.log("INICIO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, payload });
-    setDebugSteps([{ stage: "ETAPA 1 - INICIO_SAVE", payload }]);
+    const saveStartedAt = Date.now();
+    savingRef.current = true;
+    setDebugSteps([{ stage: "ETAPA 0 - CLIQUE_SALVAR", operation: "handleSave", date, payload, timeoutMs: SAVE_UI_TIMEOUT_MS }]);
     setSaving(true);
     setSaved(false);
     setSaveError("");
     try {
-      await saveEntry(date, draft, (step) => {
-        setDebugSteps((current) => [...current, step]);
-      });
+      setDebugSteps((current) => [...current, { stage: "ETAPA 0.1 - ANTES_SAVE_ENTRY", operation: "saveEntry", date, payload, timeoutMs: SAVE_UI_TIMEOUT_MS }]);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          saveEntry(date, draft, (step) => {
+            setDebugSteps((current) => [...current, step]);
+          }),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error(`Timeout no handleSave: saveEntry nao retornou em ${SAVE_UI_TIMEOUT_MS}ms para ${date}.`));
+            }, SAVE_UI_TIMEOUT_MS);
+          })
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+      setDebugSteps((current) => [
+        ...current,
+        { stage: "ETAPA 0.2 - DEPOIS_SAVE_ENTRY", operation: "saveEntry", date, payload, elapsedMs: Date.now() - saveStartedAt, timeoutMs: SAVE_UI_TIMEOUT_MS }
+      ]);
       setSaved(true);
       console.log("DADOS_SALVOS_COM_SUCESSO", { date, app_id: APP_ID, company_id: COMPANY_ID });
     } catch (error) {
       const message = formatErrorForScreen(error);
       console.error("ERRO_SAVE", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
+      setDebugSteps((current) => [
+        ...current,
+        {
+          stage: "ETAPA 0.2 - DEPOIS_SAVE_ENTRY - ERRO",
+          operation: "saveEntry",
+          date,
+          payload,
+          error: serializeSaveError(error),
+          elapsedMs: Date.now() - saveStartedAt,
+          timeoutMs: SAVE_UI_TIMEOUT_MS
+        }
+      ]);
       setSaveError(message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

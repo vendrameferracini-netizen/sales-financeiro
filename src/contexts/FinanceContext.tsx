@@ -71,8 +71,20 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
       getEntry,
       saveEntry: (date, carrierInputs, onDebugStep) => {
         const normalizedDate = normalizeEntryDate(date);
+        onDebugStep?.({
+          stage: "ETAPA 0.3 - CONTEXT_SAVE_ENTRY_INICIO",
+          operation: "saveEntry",
+          date: normalizedDate,
+          payload: { input_date: date, normalized_date: normalizedDate }
+        });
         const saveRequest = entriesRequestRef.current + 1;
         entriesRequestRef.current = saveRequest;
+        onDebugStep?.({
+          stage: "ETAPA 0.4 - CONTEXT_REQUEST_REGISTRADO",
+          operation: "entriesRequestRef",
+          date: normalizedDate,
+          payload: { saveRequest }
+        });
         const nextEntry = {
           date: normalizedDate,
           carriers: {
@@ -80,8 +92,20 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
             ...carrierInputs
           }
         };
+        onDebugStep?.({
+          stage: "ETAPA 0.5 - ANTES_SAVE_DAILY_ENTRY",
+          operation: "saveDailyEntry",
+          date: normalizedDate,
+          payload: { saveRequest, carriers_count: carriers.length, entry_carriers_count: Object.keys(nextEntry.carriers || {}).length }
+        });
         return saveDailyEntry(nextEntry, carriers, onDebugStep)
           .then((freshEntry) => {
+            onDebugStep?.({
+              stage: "ETAPA 0.6 - DEPOIS_SAVE_DAILY_ENTRY",
+              operation: "saveDailyEntry",
+              date: normalizedDate,
+              payload: { saveRequest, request_atual: entriesRequestRef.current, atualiza_estado: saveRequest === entriesRequestRef.current }
+            });
             if (saveRequest !== entriesRequestRef.current) return;
             setEntries((current) => ({
               ...current,
