@@ -1109,14 +1109,26 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
 
   for (const stalePackage of stalePackages) {
     const stalePayload = { id: text(stalePackage, ["id"]), daily_entry_id: dailyId, normalized_date: normalizedDate, app_id: APP_ID, company_id: COMPANY_ID };
-    emit({
-      stage: "ETAPA 5.3 - PACKAGE_ANTIGO_PRESERVADO",
-      table: "package_entries",
-      operation: "delete_stale_for_daily_entry_skipped",
-      date: normalizedDate,
-      id: text(stalePackage, ["id"]),
-      payload: stalePayload
-    });
+    await runSaveDiagnosticStep(
+      emit,
+      {
+        beforeStage: "ETAPA 5.3 - ANTES_REMOVER_PACKAGE_ANTIGO",
+        afterStage: "ETAPA 5.4 - DEPOIS_REMOVER_PACKAGE_ANTIGO",
+        table: "package_entries",
+        operation: "delete_stale_for_daily_entry",
+        date: normalizedDate,
+        id: text(stalePackage, ["id"]),
+        payload: stalePayload
+      },
+      () =>
+        runSupabase(
+          "package_entries",
+          "delete_stale_for_daily_entry",
+          stalePayload,
+          () => requireSupabase().from("package_entries").delete().eq("id", text(stalePackage, ["id"])).eq("company_id", COMPANY_ID).eq("app_id", APP_ID),
+          { throwOnError: true }
+        )
+    );
   }
 
   const freshEntry = await runTimedDiagnosticStep(
