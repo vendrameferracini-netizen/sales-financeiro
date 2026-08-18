@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Carrier, DailyCarrierInput, DailyEntry, FixedCost, SaveDebugStep } from "../types";
 import { normalizeEntryDate } from "../utils/dates";
-import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
+import { deleteCarrier, deleteFixedCost, loadFinanceData, reloadCarriers, reloadEntryByDate, saveCarrier, saveDailyEntry, saveFixedCost, sortCarriersByName } from "../utils/storage";
 
 type FinanceContextValue = {
   carriers: Carrier[];
@@ -10,6 +10,7 @@ type FinanceContextValue = {
   loading: boolean;
   error: string;
   getEntry: (date: string) => DailyEntry | undefined;
+  refreshEntry: (date: string) => Promise<DailyEntry | undefined>;
   saveEntry: (date: string, carriers: Record<string, DailyCarrierInput>, onDebugStep?: (step: SaveDebugStep) => void) => Promise<void>;
   addCarrier: (carrier: Omit<Carrier, "id">) => Promise<void>;
   updateCarrier: (carrier: Carrier) => Promise<void>;
@@ -61,6 +62,32 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
 
   const getEntry = useCallback((date: string) => entries[normalizeEntryDate(date)], [entries]);
 
+  const refreshEntry = useCallback(async (date: string) => {
+    const normalizedDate = normalizeEntryDate(date);
+    const loadRequest = entriesRequestRef.current;
+    try {
+      const freshEntry = await reloadEntryByDate(normalizedDate);
+      if (loadRequest !== entriesRequestRef.current) return freshEntry || undefined;
+      setEntries((current) => {
+        if (freshEntry) {
+          return {
+            ...current,
+            [normalizedDate]: freshEntry
+          };
+        }
+        const next = { ...current };
+        delete next[normalizedDate];
+        return next;
+      });
+      setError("");
+      return freshEntry || undefined;
+    } catch (loadError) {
+      console.error("Erro completo ao carregar lancamento por data no Supabase", loadError);
+      setError(errorText(loadError));
+      throw loadError;
+    }
+  }, []);
+
   const value = useMemo<FinanceContextValue>(
     () => ({
       carriers,
@@ -69,6 +96,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
       loading,
       error,
       getEntry,
+      refreshEntry,
       saveEntry: (date, carrierInputs, onDebugStep) => {
         const normalizedDate = normalizeEntryDate(date);
         onDebugStep?.({
@@ -180,7 +208,7 @@ export const FinanceProvider = ({ children }: { children: ReactNode }) => {
           });
       }
     }),
-    [carriers, entries, fixedCosts, getEntry, loading, error]
+    [carriers, entries, fixedCosts, getEntry, refreshEntry, loading, error]
   );
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;

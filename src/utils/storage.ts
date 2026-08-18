@@ -594,23 +594,23 @@ const buildEntryFromRows = (date: string, dailyRows: DbRow[], packageRows: DbRow
 
   if (!matchingDailyRows.length) return null;
 
+  const dailyIds = new Set(matchingDailyRows.map((dailyRow) => text(dailyRow, ["id"])).filter(Boolean));
   const carriers = matchingDailyRows.reduce<Record<string, DailyCarrierInput>>((acc, dailyRow) => {
-    const dailyId = text(dailyRow, ["id"]);
     const legacyCarriers = (dailyRow.carriers || {}) as Record<string, DailyCarrierInput>;
     Object.entries(legacyCarriers).forEach(([carrierId, input]) => {
       acc[carrierId] = packageInputFromRow(input as unknown as DbRow);
     });
 
-    packageRows
-      .filter((row) => text(row, ["daily_entry_id", "entry_id", "daily_id"]) === dailyId)
-      .sort(activePackageSort)
-      .forEach((row) => {
-        const carrierId = text(row, ["carrier_id", "transportadora_id"]);
-        if (carrierId) acc[carrierId] = packageInputFromRow(row);
-      });
-
     return acc;
   }, {});
+
+  packageRows
+    .filter((row) => dailyIds.has(text(row, ["daily_entry_id", "entry_id", "daily_id"])))
+    .sort(activePackageSort)
+    .forEach((row) => {
+      const carrierId = text(row, ["carrier_id", "transportadora_id"]);
+      if (carrierId) carriers[carrierId] = packageInputFromRow(row);
+    });
 
   return { date: normalizedDate, carriers };
 };
@@ -675,6 +675,8 @@ const loadEntryByDate = async (date: string): Promise<DailyEntry | null> => {
 
   return buildEntryFromRows(normalizedDate, dailyRows, packageRows);
 };
+
+export const reloadEntryByDate = async (date: string) => loadEntryByDate(date);
 
 const loadFixedCosts = async (company: DbRow) => {
   const [fixedResult, costsResult] = await Promise.all([

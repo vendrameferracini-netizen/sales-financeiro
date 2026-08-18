@@ -25,7 +25,7 @@ const buildBlankDraft = (carriers: Carrier[]) =>
   }, {});
 
 export const DailyEntryPage = () => {
-  const { carriers, getEntry, saveEntry } = useFinance();
+  const { carriers, getEntry, refreshEntry, saveEntry } = useFinance();
   const activeCarriers = useMemo(() => carriers.filter((carrier) => carrier.active), [carriers]);
   const [date, setDate] = useState(todayISO());
   const [draft, setDraft] = useState<Record<string, DailyCarrierInput>>(() => buildBlankDraft(activeCarriers));
@@ -34,31 +34,44 @@ export const DailyEntryPage = () => {
   const [saveError, setSaveError] = useState("");
   const [debugSteps, setDebugSteps] = useState<SaveDebugStep[]>([]);
   const savingRef = useRef(false);
+  const selectedEntry = getEntry(date);
 
   useEffect(() => {
-    const entry = getEntry(date);
     const next = buildBlankDraft(activeCarriers);
     activeCarriers.forEach((carrier) => {
-      next[carrier.id] = normalizeCarrierInput(entry?.carriers?.[carrier.id]);
+      next[carrier.id] = normalizeCarrierInput(selectedEntry?.carriers?.[carrier.id]);
     });
     setDraft(next);
     setSaved(false);
     setSaveError("");
     setDebugSteps([]);
-  }, [activeCarriers, date, getEntry]);
+  }, [activeCarriers, date, selectedEntry]);
+
+  useEffect(() => {
+    let active = true;
+    refreshEntry(date).catch((error) => {
+      if (!active) return;
+      const message = formatErrorForScreen(error);
+      console.error("ERRO_CARREGAR_DATA", { date, app_id: APP_ID, company_id: COMPANY_ID, error });
+      setSaveError(message);
+    });
+    return () => {
+      active = false;
+    };
+  }, [date, refreshEntry]);
 
   const hasPendingDraft = useMemo(() => {
-    const savedInputs = getEntry(date)?.carriers || {};
+    const savedInputs = selectedEntry?.carriers || {};
     return activeCarriers.some((carrier) => {
       const draftInput = normalizeCarrierInput(draft[carrier.id]);
       const savedInput = normalizeCarrierInput(savedInputs[carrier.id]);
       return draftInput.ml !== savedInput.ml || draftInput.shopee !== savedInput.shopee || draftInput.avulso !== savedInput.avulso;
     });
-  }, [activeCarriers, date, draft, getEntry]);
+  }, [activeCarriers, draft, selectedEntry]);
 
   const dailyReport = useMemo(() => {
-    return buildDailyFullValueReport(hasPendingDraft ? draft : getEntry(date)?.carriers || {}, carriers);
-  }, [carriers, date, draft, getEntry, hasPendingDraft]);
+    return buildDailyFullValueReport(hasPendingDraft ? draft : selectedEntry?.carriers || {}, carriers);
+  }, [carriers, draft, hasPendingDraft, selectedEntry]);
 
   const updateField = (carrierId: string, field: keyof DailyCarrierInput, value: string) => {
     const parsed = Math.max(0, Number.parseInt(value || "0", 10) || 0);
