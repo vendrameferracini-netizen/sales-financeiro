@@ -933,9 +933,7 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
   const dailyId = text((dailyResult.data || existing || {}) as DbRow, ["id"]);
   if (!dailyId) throw new Error("Nao foi possivel identificar o lancamento diario salvo.");
 
-  const rows = Object.entries(entry.carriers || {})
-    .filter(([, input]) => (Number(input.ml) || 0) + (Number(input.shopee) || 0) + (Number(input.avulso) || 0) > 0)
-    .map(([carrierId, input]) => packageRow(dailyId, carrierId, input));
+  const rows = Object.entries(entry.carriers || {}).map(([carrierId, input]) => packageRow(dailyId, carrierId, input));
 
   console.log("TENTANDO_SALVAR_PACKAGE_ENTRIES", {
     table: "package_entries",
@@ -1131,7 +1129,7 @@ export const saveDailyEntry = async (entry: DailyEntry, carriers: Carrier[] = []
     () => loadEntryByDate(normalizedDate)
   );
   if (!freshEntry) throw new Error(`Lancamento de ${normalizedDate} nao foi encontrado no Supabase apos salvar.`);
-  const expectedRows = rows.filter((row) => (Number(row.ml) || 0) + (Number(row.shopee) || 0) + (Number(row.avulso) || 0) > 0);
+  const expectedRows = rows;
   const confirmedRows = expectedRows.filter((row) => {
     const confirmedInput = freshEntry.carriers[String(row.carrier_id)];
     return (
